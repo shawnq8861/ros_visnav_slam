@@ -1,0 +1,12 @@
+<launch>
+
+  <!--type for a C++ node must match the executable name in CMakeLists.txt-->
+  <!--pkg is the pkg name-->
+  <!--name is the node name and will show in rosnode list after launch-->
+  <node pkg="ros-visnav-slam-cnn" name="pub_hello" type="pub_test_node"/>
+  <node pkg="ros-visnav-slam-cnn" name="sub_hello" type="sub_test_node"/>
+  <!--type for a python node is the name os the file-->
+  <node pkg="ros-visnav-slam-cnn" name="py_pub_hello" type="pub_node_py.py"/>
+  <node pkg="ros-visnav-slam-cnn" name="py_sub_hello" type="sub_node_py.py"/>
+
+</launch>
