@@ -2,6 +2,9 @@
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
 #include <lumenera/lucamapi.h>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <exception>
 
 static uint32_t imageHeight = 0;
 static uint32_t imageWidth = 0;
@@ -54,9 +57,11 @@ int main(int argc, char **argv)
     //
     std::vector<unsigned char> imageData(imageHeight * imageWidth);
     //
-    // set camera for auto white balance, expsoure, and gain
+    // create a matrix to hold the image data
     //
-
+    cv::Mat frame;                  // the raw image data from camera
+    uint imageFormat = CV_8UC3;     // 8/24 bit unsigned bayer image
+    frame = cv::Mat(cv::Size(width, height), imageFormat);
     //
     // start the video stream, NULL window handle
     //
@@ -67,6 +72,7 @@ int main(int argc, char **argv)
     //
     // loop while acquiring image frames from the stream
     //
+    int count = 0;
     while(ros::ok()) {
         //
         // set one shot auto exposure target
@@ -129,9 +135,27 @@ int main(int argc, char **argv)
         //
         // save the snap shot to file
         //
+        frame.data = (uchar *)imageData.data();
+        //
+        // need to convert from Bayer to RGB
+        //
+
+        //
+        // build up jpeg image data and write to file
+        //
+        if(count == 10) {
+            ROS_INFO_STREAM("saving file...");
+            std::vector<int> compression_params;
+            compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
+            compression_params.push_back(95);
+            //cv::imwrite("/home/shawn/Pictures/test_image.jpg",
+                        //frame,
+                        //compression_params);
+        }
         //
         // process callbacks and check for messages
         //
+        ++count;
         ros::spinOnce();
         loop_rate.sleep();
     }
