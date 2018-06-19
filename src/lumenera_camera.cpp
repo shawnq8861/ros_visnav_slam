@@ -13,7 +13,7 @@ int main(int argc, char **argv)
     //
     // instantiate a publisher for camera images
     //
-    ros::Publisher image_pub = nh.advertise<sensor_msgs::Image>("image_raw", 50);
+    ros::Publisher image_pub = nh.advertise<sensor_msgs::Image>("image_raw", 10);
     //
     // set the loop rate used by spin to control while loop execution
     // this is an integer that equates to loops/second
@@ -65,13 +65,41 @@ int main(int argc, char **argv)
        ROS_INFO_STREAM("Failed to start streaming");
     }
     //
-    // declare an image message object to hold the data
-    //
-    sensor_msgs::Image image;
-    //
-    // loop while acuiring image frames from the stream
+    // loop while acquiring image frames from the stream
     //
     while(ros::ok()) {
+        //
+        // set one shot auto exposure target
+        //
+        UCHAR brightnessTarget = 90;
+        ULONG startX = 0;
+        ULONG startY = 0;
+        //
+        // set auto exposure
+        //
+        LucamOneShotAutoExposure(hCamera,
+                                 brightnessTarget,
+                                 startX,
+                                 startY,
+                                 width,
+                                 height);
+        //
+        // set auto gain
+        //
+        LucamOneShotAutoGain(hCamera,
+                             brightnessTarget,
+                             startX,
+                             startY,
+                             width,
+                             height);
+        //
+        // set auto white balance
+        //
+        LucamOneShotAutoWhiteBalance(hCamera,
+                                     startX,
+                                     startY,
+                                     width,
+                                     height);
         //
         // grab a snap shot
         //
@@ -81,8 +109,13 @@ int main(int argc, char **argv)
             ROS_ERROR_STREAM("Failed to capture image");
         }
         //
+        // declare an image message object to hold the data
+        //
+        sensor_msgs::Image image;
+        //
         // configure the image message
         //
+        image.header.stamp = ros::Time::now();
         image.data = imageData;
         image.height = imageHeight;
         image.width = imageWidth;
