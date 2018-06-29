@@ -4,10 +4,8 @@
 #include <lumenera/lucamapi.h>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 #include <exception>
-
-static uint32_t imageHeight = 0;
-static uint32_t imageWidth = 0;
 
 int main(int argc, char **argv)
 {
@@ -37,31 +35,21 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
     //
-    // get the camera sensor properties
+    // get the frame format
     //
-    float height;
-    float width;
-    LONG flags;
-    BOOL success = LucamGetProperty(hCamera, LUCAM_PROP_MAX_HEIGHT, &height, &flags);
-    if(success) {
-        ROS_INFO_STREAM("max height (pixels): " << height);
-        imageHeight = (uint32_t)height;
-    }
-    success = LucamGetProperty(hCamera, LUCAM_PROP_MAX_WIDTH, &width, &flags);
-    if(success) {
-        ROS_INFO_STREAM("max width (pixels): " << width);
-        imageWidth = (uint32_t)width;
-    }
+    LUCAM_FRAME_FORMAT frameFormat;
+    float frameRate = -1.0f;
+    LucamGetFormat(hCamera, &frameFormat, &frameRate);
+    const ULONG imageWidth = (frameFormat.width / frameFormat.subSampleX);
+    const ULONG imageHeight = (frameFormat.height / frameFormat.subSampleY);
+    LUCAM_CONVERSION conversionParams;
+    conversionParams.CorrectionMatrix = LUCAM_CM_FLUORESCENT;
+    conversionParams.DemosaicMethod = LUCAM_DM_HIGHER_QUALITY;
     //
-    // create a vector to hold image data
+    // create vectors to hold image data
     //
-    std::vector<unsigned char> imageData(imageHeight * imageWidth);
-    //
-    // create a matrix to hold the image data
-    //
-    cv::Mat frame;                  // the raw image data from camera
-    uint imageFormat = CV_8UC3;     // 8/24 bit unsigned bayer image
-    frame = cv::Mat(cv::Size(width, height), imageFormat);
+    std::vector<unsigned char> rawImageData(imageHeight * imageWidth);
+    std::vector<unsigned char> rgbImageData(imageHeight * imageWidth);
     //
     // start the video stream, NULL window handle
     //
@@ -87,8 +75,8 @@ int main(int argc, char **argv)
                                  brightnessTarget,
                                  startX,
                                  startY,
-                                 width,
-                                 height);
+                                 imageWidth,
+                                 imageHeight);
         //
         // set auto gain
         //
@@ -96,21 +84,21 @@ int main(int argc, char **argv)
                              brightnessTarget,
                              startX,
                              startY,
-                             width,
-                             height);
+                             imageWidth,
+                             imageHeight);
         //
         // set auto white balance
         //
         LucamOneShotAutoWhiteBalance(hCamera,
                                      startX,
                                      startY,
-                                     width,
-                                     height);
+                                     imageWidth,
+                                     imageHeight);
         //
         // grab a snap shot
         //
         LONG singleFrame = 1;
-        if(LucamTakeVideo(hCamera, singleFrame, (BYTE *)imageData.data()) == FALSE)
+        if(LucamTakeVideo(hCamera, singleFrame, (BYTE *)rawImageData.data()) == FALSE)
         {
             ROS_ERROR_STREAM("Failed to capture image");
         }
@@ -122,12 +110,11 @@ int main(int argc, char **argv)
         // configure the image message
         //
         image.header.stamp = ros::Time::now();
-        image.data = imageData;
+        image.data = rawImageData;
         image.height = imageHeight;
         image.width = imageWidth;
         image.step = imageWidth;
         image.encoding = sensor_msgs::image_encodings::BAYER_BGGR8;
-
         //
         // publish the image to an image_view data type
         //
@@ -135,22 +122,30 @@ int main(int argc, char **argv)
         //
         // save the snap shot to file
         //
-        frame.data = (uchar *)imageData.data();
-        //
-        // need to convert from Bayer to RGB
-        //
-
+        cv::Mat frame(cv::Size(imageWidth, imageHeight),
+                      CV_8UC1,
+                      rawImageData.data(),
+                      cv::Mat::AUTO_STEP);
+        ROS_INFO_STREAM("number of channels: " << frame.channels());
+        ROS_INFO_STREAM("number of cols: " << frame.cols);
+        ROS_INFO_STREAM("number of rows: " << frame.rows);
+        ROS_INFO_STREAM("type: " << frame.type());
         //
         // build up jpeg image data and write to file
         //
         if(count == 10) {
             ROS_INFO_STREAM("saving file...");
+            ROS_INFO_STREAM("creating frame...");
+            cv::Mat saveFrame(cv::Size(imageWidth, imageHeight),
+                              CV_8UC3);
+            cv::cvtColor(frame, saveFrame, cv::COLOR_BayerBG2BGR);
             std::vector<int> compression_params;
             compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
             compression_params.push_back(95);
-            //cv::imwrite("/home/shawn/Pictures/test_image.jpg",
-                        //frame,
-                        //compression_params);
+            ROS_INFO_STREAM("saving frame...");
+            cv::imwrite("/home/shawn/Pictures/test_image.jpg",
+                        saveFrame,
+                        compression_params);
         }
         //
         // process callbacks and check for messages
