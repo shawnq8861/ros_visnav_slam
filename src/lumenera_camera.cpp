@@ -1,11 +1,66 @@
 #include <ros/ros.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
+#include <std_msgs/String.h>
 #include <lumenera/lucamapi.h>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
-#include <exception>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <libgen.h>
+#include <string.h>
+
+static ULONG imageWidth;
+static ULONG imageHeight;
+static cv::Mat frame;
+
+//
+// subscribe to the save_image topic to be notified when to save an image
+// to a file
+//
+void saveImage(const std_msgs::String path)
+{
+    //
+    // extract the directory and base name from the path
+    //
+    ROS_INFO_STREAM("saved file path: " << path);
+    std::string pathStr = path.data;
+    char *pathCopy = strdup(pathStr.c_str());
+    char *baseName = basename(pathCopy);
+    char *dirName = dirname(pathCopy);
+    //
+    // check file extension
+    //
+    std::string fileExt = ".jpg";
+    std::string baseStr(baseName);
+    size_t pos = baseStr.find_first_of(".");
+    std::string baseExt = baseStr.substr(pos);
+    if (0 != strcmp(fileExt.c_str(), baseExt.c_str())) {
+        ROS_INFO_STREAM("usage:  please use file extension .jpg...");
+    }
+    //
+    // create the directory if it does not exist
+    //
+    struct stat statBuff;
+    int dirFound = stat(dirName, &statBuff);
+    if (dirFound == -1) {
+        ROS_INFO_STREAM("directory does not exist, creating...");
+        int dirCreated = mkdir(dirName, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+        if (dirCreated == -1) {
+            ROS_INFO_STREAM("mkdir failed...");
+        }
+    }
+    cv::Mat saveFrame(cv::Size(imageWidth, imageHeight),CV_8UC3);
+    cv::cvtColor(frame, saveFrame, cv::COLOR_BayerBG2RGB);
+    std::vector<int> compression_params;
+    compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
+    compression_params.push_back(95);
+    ROS_INFO_STREAM("saving frame...");
+    cv::imwrite(path.data,
+                saveFrame,
+                compression_params);
+}
 
 int main(int argc, char **argv)
 {
@@ -20,6 +75,10 @@ int main(int argc, char **argv)
     // this is an integer that equates to loops/second
     //
     ros::Rate loop_rate = 10;
+    //
+    // instantiate the subscriber for rest messages
+    //
+    ros::Subscriber save_image = nh.subscribe("save_image", 1000, saveImage);
     //
     // get the number of cameras
     //
@@ -40,8 +99,8 @@ int main(int argc, char **argv)
     LUCAM_FRAME_FORMAT frameFormat;
     float frameRate = -1.0f;
     LucamGetFormat(hCamera, &frameFormat, &frameRate);
-    const ULONG imageWidth = (frameFormat.width / frameFormat.subSampleX);
-    const ULONG imageHeight = (frameFormat.height / frameFormat.subSampleY);
+    imageWidth = (frameFormat.width / frameFormat.subSampleX);
+    imageHeight = (frameFormat.height / frameFormat.subSampleY);
     LUCAM_CONVERSION conversionParams;
     conversionParams.CorrectionMatrix = LUCAM_CM_FLUORESCENT;
     conversionParams.DemosaicMethod = LUCAM_DM_HIGHER_QUALITY;
@@ -49,7 +108,6 @@ int main(int argc, char **argv)
     // create vectors to hold image data
     //
     std::vector<unsigned char> rawImageData(imageHeight * imageWidth);
-    std::vector<unsigned char> rgbImageData(imageHeight * imageWidth);
     //
     // start the video stream, NULL window handle
     //
@@ -120,33 +178,12 @@ int main(int argc, char **argv)
         //
         image_pub.publish(image);
         //
-        // save the snap shot to file
+        // save the snap shot to OpenCV Mat
         //
-        cv::Mat frame(cv::Size(imageWidth, imageHeight),
+        frame = cv::Mat(cv::Size(imageWidth, imageHeight),
                       CV_8UC1,
                       rawImageData.data(),
                       cv::Mat::AUTO_STEP);
-        ROS_INFO_STREAM("number of channels: " << frame.channels());
-        ROS_INFO_STREAM("number of cols: " << frame.cols);
-        ROS_INFO_STREAM("number of rows: " << frame.rows);
-        ROS_INFO_STREAM("type: " << frame.type());
-        //
-        // build up jpeg image data and write to file
-        //
-        if(count == 10) {
-            ROS_INFO_STREAM("saving file...");
-            ROS_INFO_STREAM("creating frame...");
-            cv::Mat saveFrame(cv::Size(imageWidth, imageHeight),
-                              CV_8UC3);
-            cv::cvtColor(frame, saveFrame, cv::COLOR_BayerBG2BGR);
-            std::vector<int> compression_params;
-            compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
-            compression_params.push_back(95);
-            ROS_INFO_STREAM("saving frame...");
-            cv::imwrite("/home/shawn/Pictures/test_image.jpg",
-                        saveFrame,
-                        compression_params);
-        }
         //
         // process callbacks and check for messages
         //
