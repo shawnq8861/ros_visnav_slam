@@ -7,10 +7,12 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/video/tracking.hpp>
 
 static cv_bridge::CvImagePtr cv_ptr;
 static cv::Mat frame;
-static const char *window_name = "Optical Flow";
+static const char *window_name_live = "Live Image";
+static const char *window_name_tracking = "Optical Flow Tracking";
 
 //
 // subscribe to the image_raw topic to be notified when a new image
@@ -51,81 +53,138 @@ int main(int argc, char **argv)
     //
     int count = 0;
     ROS_INFO_STREAM("hit <Esc> to close image window...");
+    ROS_INFO_STREAM("hit <Space> to track again...");
+    bool trackingComplete = false;
     bool featuresInitialized = false;
     cv::Mat firstImage;
     cv::Mat secondImage;
     cv::Mat firstGrayImg;
     cv::Mat secondGrayImg;
+    cv::Mat trackingImage;
     std::vector<cv::Point2f> firstCorners;
+    std::vector<cv::Point2f> secondCorners;
+    std::vector<uchar> trackedFeatures;
     const int maxCorners = 500;
     const double qualityLevel = .01;
     const double minDistance = 5.0;
     const int blockSize = 3;
     bool useHarris = true;
     double harrisFreeParameter = .04;
+    const int searchWinSize = 10;
+    const int maxCount = 20;
+    double epsilon = .03;
+    cv::TermCriteria termCrit;
     while(ros::ok()) {
-        //
-        // capture first frame and find the good features to track
-        // which will be used with successive images during tracking
-        //
-        if (!featuresInitialized) {
-            if(frame.rows > 0 && frame.cols > 0) {
-                frame.copyTo(firstImage);
-                //
-                // convert to grayscale
-                //
-                cv::cvtColor(firstImage, firstGrayImg, cv::COLOR_BGR2GRAY);
-                //
-                // call good features to track to find corners
-                //
-                cv::goodFeaturesToTrack(firstGrayImg,
-                                        firstCorners,
-                                        maxCorners,
-                                        qualityLevel,
-                                        minDistance,
-                                        cv::noArray(),
-                                        blockSize,
-                                        useHarris,
-                                        harrisFreeParameter
-                                        );
-                //
-                // refine pixel locations to subpixel accuracy
-                //
-                // set the half side length of the search window to 10
-                // for a 20 x 20 search window
-                //
-                const int winSize = 10;
-                const int maxCount = 20;
-                double epsilon = .03;
-                cv::TermCriteria termCrit = cv::TermCriteria(
-                        cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS,
-                            maxCount,
-                            epsilon);
-                cv::cornerSubPix(firstGrayImg,
-                                 firstCorners,
-                                 cv::Size(winSize, winSize),
-                                 cv::Size(-1, -1),
-                                 termCrit
-                                 );
-                //
-                // done initializing, set the flag to true
-                //
-                ROS_INFO_STREAM("initial features found...");
-                featuresInitialized = true;
+        if (!trackingComplete) {
+            //
+            // capture first frame and find the good features to track
+            // which will be used with successive images during tracking
+            //
+            if (!featuresInitialized) {
+                if(frame.rows > 0 && frame.cols > 0) {
+                    frame.copyTo(firstImage);
+                    frame.copyTo(trackingImage);
+                    //
+                    // convert to grayscale
+                    //
+                    cv::cvtColor(firstImage, firstGrayImg, cv::COLOR_BGR2GRAY);
+                    //
+                    // call good features to track to find corners
+                    //
+                    cv::goodFeaturesToTrack(firstGrayImg,
+                                            firstCorners,
+                                            maxCorners,
+                                            qualityLevel,
+                                            minDistance,
+                                            cv::noArray(),
+                                            blockSize,
+                                            useHarris,
+                                            harrisFreeParameter
+                                            );
+                    //
+                    // refine pixel locations to subpixel accuracy
+                    //
+                    // set the half side length of the search window to 10
+                    // for a 20 x 20 search window
+                    //
+                    termCrit = cv::TermCriteria(
+                                cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS,
+                                maxCount,
+                                epsilon);
+                    cv::cornerSubPix(firstGrayImg,
+                                     firstCorners,
+                                     cv::Size(searchWinSize, searchWinSize),
+                                     cv::Size(-1, -1),
+                                     termCrit
+                                     );
+                    //
+                    // done initializing, set the flag to true
+                    //
+                    ROS_INFO_STREAM("initial features found...");
+                    featuresInitialized = true;
+                }
             }
-        }
-        else if(count == 100) {
-            if(frame.rows > 0 && frame.cols > 0) {
-                //
-                // capture second frame and estimate the camera motion
-                // using pyramid Lucas-Kanade
-                //
-                frame.copyTo(secondImage);
-                //
-                // convert to grayscale
-                //
-                cv::cvtColor(secondImage, secondGrayImg, cv::COLOR_BGR2GRAY);
-                //
+            else if(count == 100) {
+                if(frame.rows > 0 && frame.cols > 0) {
+                    //
+                    // capture second frame and estimate the camera motion
+                    // using pyramid Lucas-Kanade
+                    //
+                    frame.copyTo(secondImage);
+                    //
+                    // convert to grayscale
+                    //
+                    cv::cvtColor(secondImage, secondGrayImg, cv::COLOR_BGR2GRAY);
+                    //
+                    // call pyramid Lucas Kanade
+                    //
+                    int maxPyramidLevel = 5;
+                    epsilon = .3;
+                    termCrit = cv::TermCriteria(
+                                cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS,
+                                maxCount,
+                                epsilon);
+                    cv::calcOpticalFlowPyrLK(firstGrayImg,
+                                             secondGrayImg,
+                                             firstCorners,
+                                             secondCorners,
+                                             trackedFeatures,
+                                             cv::noArray(),
+                                             cv::Size(searchWinSize * 2 + 1,
+                                                      searchWinSize * 2 + 1),
+                                             maxPyramidLevel,
+                                             termCrit
+                                             );
+                    //
+                    // overlay the points onto the first color image and dispay it
+                    // use a for loop, draws lines between first points and
+                    // second points, as long as a feature was found, draw
+                    // each line on the tracked image, then show the image in
+                    // a named window
+                    //
+                    cv::Scalar lineColor(0, 255, 0);
+                    int lineThickness = 1;
+                    int lineType = cv::LINE_AA;
+                    for (int i = 0;
+                         i < static_cast<int>(firstCorners.size());
+                         ++i) {
+                        if (trackedFeatures[i] == 0) {
+                            continue;
+                        }
+                        else {
+                            cv::line(trackingImage,
+                                     firstCorners[i],
+                                     secondCorners[i],
+                                     lineColor,
+                                     lineThickness,
+                                     lineType
+                                     );
+                        }
+                    }
+                    cv::namedWindow( window_name_tracking,
+                                     cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+                    cv::imshow(window_name_tracking, trackingImage);
+                }
             }
         }
 
@@ -216,9 +275,10 @@ int main(int argc, char **argv)
         //
         // display the live image
         //
-        cv::namedWindow( window_name, cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
-        if (frame.rows > 0 && frame.cols) {
-            cv::imshow(window_name, frame);
+        cv::namedWindow( window_name_live,
+                         cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+        if (frame.rows > 0 && frame.cols > 0) {
+            cv::imshow(window_name_live, frame);
         }
         char c = (char)(cv::waitKey(10));
         if (c == 27) {
