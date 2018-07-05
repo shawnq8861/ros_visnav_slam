@@ -9,6 +9,10 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/video/tracking.hpp>
 
+#define ESCAPE      27
+#define SPACE       32
+#define BACKSPACE   8
+
 static cv_bridge::CvImagePtr cv_ptr;
 static cv::Mat frame;
 static const char *window_name_live = "Live Image";
@@ -54,6 +58,7 @@ int main(int argc, char **argv)
     int count = 0;
     ROS_INFO_STREAM("hit <Esc> to close image window...");
     ROS_INFO_STREAM("hit <Space> to track again...");
+    bool startTracking = false;
     bool trackingComplete = false;
     bool featuresInitialized = false;
     cv::Mat firstImage;
@@ -64,7 +69,7 @@ int main(int argc, char **argv)
     std::vector<cv::Point2f> firstCorners;
     std::vector<cv::Point2f> secondCorners;
     std::vector<uchar> trackedFeatures;
-    const int maxCorners = 500;
+    const int maxCorners = 50;
     const double qualityLevel = .01;
     const double minDistance = 5.0;
     const int blockSize = 3;
@@ -75,7 +80,7 @@ int main(int argc, char **argv)
     double epsilon = .03;
     cv::TermCriteria termCrit;
     while(ros::ok()) {
-        if (!trackingComplete) {
+        if (startTracking && !trackingComplete) {
             //
             // capture first frame and find the good features to track
             // which will be used with successive images during tracking
@@ -124,7 +129,8 @@ int main(int argc, char **argv)
                     featuresInitialized = true;
                 }
             }
-            else if(count == 100) {
+            else if(count > 10) {
+                ROS_INFO_STREAM("count =  " << count);
                 if(frame.rows > 0 && frame.cols > 0) {
                     //
                     // capture second frame and estimate the camera motion
@@ -162,8 +168,8 @@ int main(int argc, char **argv)
                     // each line on the tracked image, then show the image in
                     // a named window
                     //
-                    cv::Scalar lineColor(0, 255, 0);
-                    int lineThickness = 1;
+                    cv::Scalar lineColor(255, 0, 0);
+                    int lineThickness = 3;
                     int lineType = cv::LINE_AA;
                     for (int i = 0;
                          i < static_cast<int>(firstCorners.size());
@@ -181,10 +187,15 @@ int main(int argc, char **argv)
                                      );
                         }
                     }
-                    cv::namedWindow( window_name_tracking,
-                                     cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
-                    cv::imshow(window_name_tracking, trackingImage);
+
                 }
+                trackingComplete = true;
+                startTracking = false;
+                ROS_INFO_STREAM("tracking complete...");
+                count = 0;
+            }
+            else {
+                ++count;
             }
         }
 
@@ -275,16 +286,32 @@ int main(int argc, char **argv)
         //
         // display the live image
         //
-        cv::namedWindow( window_name_live,
-                         cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+
         if (frame.rows > 0 && frame.cols > 0) {
+            cv::namedWindow( window_name_live,
+                             cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
             cv::imshow(window_name_live, frame);
+            if (trackingComplete) {
+                cv::namedWindow( window_name_tracking,
+                                 cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+                cv::imshow(window_name_tracking, trackingImage);
+            }
         }
         char c = (char)(cv::waitKey(10));
-        if (c == 27) {
+        //
+        // if char is escape, break out of while loop
+        //
+        if (c == ESCAPE) {
             break;
         }
-        ++count;
+        if (c == SPACE) {
+            featuresInitialized = false;
+            startTracking = true;
+        }
+        if (c == BACKSPACE) {
+            trackingComplete = false;
+            cv::destroyWindow(window_name_tracking);
+        }
         ros::spinOnce();
         loop_rate.sleep();
     }
