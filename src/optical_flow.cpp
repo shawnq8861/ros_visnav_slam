@@ -1,4 +1,4 @@
-#include <ros/ros.h>
+﻿#include <ros/ros.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
 #include <std_msgs/String.h>
@@ -8,6 +8,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/video/tracking.hpp>
+#include <opencv2/core/persistence.hpp>
 
 #define ESCAPE      27
 #define SPACE       32
@@ -16,7 +17,11 @@
 static cv_bridge::CvImagePtr cv_ptr;
 static cv::Mat frame;
 static const char *window_name_live = "Live Image";
-static const char *window_name_tracking = "Optical Flow Tracking";
+static const char *window_name_forward_tracking = "Forward Tracking";
+static const char *window_name_reverse_tracking = "Reverse Tracking";
+static const char *window_name_verified_tracking = "Verified Tracking";
+static const char *forwardDataFileName = "forwardData.yaml";
+static const char *reverseDataFileName = "reverseData.yaml";
 
 //
 // subscribe to the image_raw topic to be notified when a new image
@@ -36,6 +41,23 @@ void getImage(const sensor_msgs::Image raw_image)
         return;
     }
     frame = cv_ptr->image;
+}
+
+//
+// compare the x and y values of 2 points
+// return true if the x and y values are within max error of each other
+// otherwise return false
+//
+bool comparePoints(cv::Point2f point1, cv::Point2f point2, float maxDiff)
+{
+    float xError = fabs(point1.x - point2.x);
+    float yError = fabs(point1.y - point2.y);
+    if (xError < maxDiff && yError < maxDiff) {
+        return true;
+    }
+    else {
+        return false;
+    }
 }
 
 int main(int argc, char **argv)
@@ -65,14 +87,20 @@ int main(int argc, char **argv)
     cv::Mat secondImage;
     cv::Mat firstGrayImg;
     cv::Mat secondGrayImg;
-    cv::Mat trackingImage;
-    std::vector<cv::Point2f> firstCorners;
-    std::vector<cv::Point2f> secondCorners;
-    std::vector<uchar> trackedFeatures;
-    const int maxCorners = 50;
-    const double qualityLevel = .01;
+    cv::Mat forwardTrackingImage;
+    cv::Mat reverseTrackingImage;
+    cv::Mat verifiedTrackingImage;
+    std::vector<cv::Point2f> firstForwardPoints;
+    std::vector<cv::Point2f> secondForwardMatches;
+    std::vector<cv::Point2f> firstReverseMatches;
+    std::vector<cv::Point2f> firstVerifiedPoints;
+    std::vector<cv::Point2f> secondVerifiedPoints;
+    std::vector<uchar> forwardTrackedFeatures;
+    std::vector<uchar> reverseTrackedFeatures;
+    const int maxCorners = 500;
+    const double qualityLevel = .02;
     const double minDistance = 5.0;
-    const int blockSize = 3;
+    const int blockSize = 5;
     bool useHarris = true;
     double harrisFreeParameter = .04;
     const int searchWinSize = 10;
@@ -88,7 +116,9 @@ int main(int argc, char **argv)
             if (!featuresInitialized) {
                 if(frame.rows > 0 && frame.cols > 0) {
                     frame.copyTo(firstImage);
-                    frame.copyTo(trackingImage);
+                    frame.copyTo(forwardTrackingImage);
+                    frame.copyTo(reverseTrackingImage);
+                    frame.copyTo(verifiedTrackingImage);
                     //
                     // convert to grayscale
                     //
@@ -97,7 +127,7 @@ int main(int argc, char **argv)
                     // call good features to track to find corners
                     //
                     cv::goodFeaturesToTrack(firstGrayImg,
-                                            firstCorners,
+                                            firstForwardPoints,
                                             maxCorners,
                                             qualityLevel,
                                             minDistance,
@@ -117,7 +147,7 @@ int main(int argc, char **argv)
                                 maxCount,
                                 epsilon);
                     cv::cornerSubPix(firstGrayImg,
-                                     firstCorners,
+                                     firstForwardPoints,
                                      cv::Size(searchWinSize, searchWinSize),
                                      cv::Size(-1, -1),
                                      termCrit
@@ -152,9 +182,9 @@ int main(int argc, char **argv)
                                 epsilon);
                     cv::calcOpticalFlowPyrLK(firstGrayImg,
                                              secondGrayImg,
-                                             firstCorners,
-                                             secondCorners,
-                                             trackedFeatures,
+                                             firstForwardPoints,
+                                             secondForwardMatches,
+                                             forwardTrackedFeatures,
                                              cv::noArray(),
                                              cv::Size(searchWinSize * 2 + 1,
                                                       searchWinSize * 2 + 1),
@@ -162,32 +192,104 @@ int main(int argc, char **argv)
                                              termCrit
                                              );
                     //
+                    // now, find reverse matches
+                    // use the matches from the first run as the starting point
+                    // and then run pyramid lucas kanade with the images in
+                    // reverse order.
+                    //
+                    // compare the forward and reverse point matches and
+                    // only keep those that ocurred in both directions
+                    //
+                    // call pyramid Lucas Kanade
+                    //
+                    maxPyramidLevel = 5;
+                    epsilon = .3;
+                    termCrit = cv::TermCriteria(
+                                cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS,
+                                maxCount,
+                                epsilon);
+                    cv::calcOpticalFlowPyrLK(secondGrayImg,
+                                             firstGrayImg,
+                                             secondForwardMatches,
+                                             firstReverseMatches,
+                                             reverseTrackedFeatures,
+                                             cv::noArray(),
+                                             cv::Size(searchWinSize * 2 + 1,
+                                                      searchWinSize * 2 + 1),
+                                             maxPyramidLevel,
+                                             termCrit
+                                             );
+                    //
+                    // compare the first set of starting features to the
+                    // reverse matches, only keep points that match
+                    //
+                    for (int i = 0;
+                         i < static_cast<int>(secondForwardMatches.size());
+                         ++i) {
+                        //
+                        // if a reverse match was found
+                        //
+                        if (reverseTrackedFeatures[i] == 1) {
+                            if (comparePoints(firstForwardPoints[i], firstReverseMatches[i], (float)3.0)) {
+                                firstVerifiedPoints.push_back(firstReverseMatches[i]);
+                                secondVerifiedPoints.push_back(secondForwardMatches[i]);
+                            }
+                        }
+                    }
+                    //
                     // overlay the points onto the first color image and dispay it
                     // use a for loop, draws lines between first points and
                     // second points, as long as a feature was found, draw
                     // each line on the tracked image, then show the image in
                     // a named window
                     //
-                    cv::Scalar lineColor(255, 0, 0);
+                    cv::Scalar lineColorBlue(255, 0, 0);
+                    cv::Scalar lineColorRed(0, 0, 255);
                     int lineThickness = 3;
                     int lineType = cv::LINE_AA;
                     for (int i = 0;
-                         i < static_cast<int>(firstCorners.size());
+                         i < static_cast<int>(firstForwardPoints.size());
                          ++i) {
-                        if (trackedFeatures[i] == 0) {
-                            continue;
-                        }
-                        else {
-                            cv::line(trackingImage,
-                                     firstCorners[i],
-                                     secondCorners[i],
-                                     lineColor,
+                        if (forwardTrackedFeatures[i] == 1) {
+                            cv::line(forwardTrackingImage,
+                                     firstForwardPoints[i],
+                                     secondForwardMatches[i],
+                                     lineColorBlue,
                                      lineThickness,
                                      lineType
                                      );
                         }
+                        if (reverseTrackedFeatures[i] == 1) {
+                            cv::line(reverseTrackingImage,
+                                     secondForwardMatches[i],
+                                     firstReverseMatches[i],
+                                     lineColorRed,
+                                     lineThickness,
+                                     lineType
+                                     );
+                        }
+                        else {
+                            continue;
+                        }
                     }
-
+                    //
+                    // overlay the points onto the first color image and dispay it
+                    // use a for loop, draws lines between first points and
+                    // second points, then show the image in
+                    // a named window
+                    //
+                    cv::Scalar lineColorGreen(0, 255, 0);
+                    for (int i = 0;
+                         i < static_cast<int>(firstVerifiedPoints.size());
+                         ++i) {
+                        cv::line(verifiedTrackingImage,
+                                 firstVerifiedPoints[i],
+                                 secondVerifiedPoints[i],
+                                 lineColorGreen,
+                                 lineThickness,
+                                 lineType
+                                 );
+                    }
                 }
                 trackingComplete = true;
                 startTracking = false;
@@ -198,103 +300,23 @@ int main(int argc, char **argv)
                 ++count;
             }
         }
-
-/*
-        Mat gray, prevGray, image, frame;
-        vector<Point2f> points[2];
-
-
-        cap >> frame;
-        if( frame.empty() )
-            break;
-
-        frame.copyTo(image);
-        cvtColor(image, gray, COLOR_BGR2GRAY);
-
-        if( nightMode )
-            image = Scalar::all(0);
-
-        if( needToInit )
-        {
-            // automatic initialization
-            goodFeaturesToTrack(gray, points[1], MAX_COUNT, 0.01, 10, Mat(), 3, 3, 0, 0.04);
-            cornerSubPix(gray, points[1], subPixWinSize, Size(-1,-1), termcrit);
-            addRemovePt = false;
-        }
-        else if( !points[0].empty() )
-        {
-            vector<uchar> status;
-            vector<float> err;
-            if(prevGray.empty())
-                gray.copyTo(prevGray);
-            calcOpticalFlowPyrLK(prevGray, gray, points[0], points[1], status, err, winSize,
-                    3, termcrit, 0, 0.001);
-            size_t i, k;
-            for( i = k = 0; i < points[1].size(); i++ )
-            {
-                if( addRemovePt )
-                {
-                    if( norm(point - points[1][i]) <= 5 )
-                    {
-                        addRemovePt = false;
-                        continue;
-                    }
-                }
-
-                if( !status[i] )
-                    continue;
-
-                points[1][k++] = points[1][i];
-                circle( image, points[1][i], 3, Scalar(0,255,0), -1, 8);
-            }
-            points[1].resize(k);
-        }
-
-        if( addRemovePt && points[1].size() < (size_t)MAX_COUNT )
-        {
-            vector<Point2f> tmp;
-            tmp.push_back(point);
-            cornerSubPix( gray, tmp, winSize, Size(-1,-1), termcrit);
-            points[1].push_back(tmp[0]);
-            addRemovePt = false;
-        }
-
-        needToInit = false;
-        imshow("LK Demo", image);
-
-        char c = (char)waitKey(10);
-        if( c == 27 )
-            break;
-        switch( c )
-        {
-        case 'r':
-            needToInit = true;
-            break;
-        case 'c':
-            points[0].clear();
-            points[1].clear();
-            break;
-        case 'n':
-            nightMode = !nightMode;
-            break;
-        }
-
-        std::swap(points[1], points[0]);
-        cv::swap(prevGray, gray);
-*/
-
         //
         // display the live image
         //
-
         if (frame.rows > 0 && frame.cols > 0) {
             cv::namedWindow( window_name_live,
                              cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
             cv::imshow(window_name_live, frame);
             if (trackingComplete) {
-                cv::namedWindow( window_name_tracking,
+                cv::namedWindow( window_name_forward_tracking,
                                  cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
-                cv::imshow(window_name_tracking, trackingImage);
+                cv::imshow(window_name_forward_tracking, forwardTrackingImage);
+                cv::namedWindow( window_name_reverse_tracking,
+                                 cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+                cv::imshow(window_name_reverse_tracking, reverseTrackingImage);
+                cv::namedWindow( window_name_verified_tracking,
+                                 cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+                cv::imshow(window_name_verified_tracking, verifiedTrackingImage);
             }
         }
         char c = (char)(cv::waitKey(10));
@@ -310,7 +332,9 @@ int main(int argc, char **argv)
         }
         if (c == BACKSPACE) {
             trackingComplete = false;
-            cv::destroyWindow(window_name_tracking);
+            cv::destroyWindow(window_name_forward_tracking);
+            cv::destroyWindow(window_name_reverse_tracking);
+            cv::destroyWindow(window_name_verified_tracking);
         }
         ros::spinOnce();
         loop_rate.sleep();
