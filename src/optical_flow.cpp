@@ -68,9 +68,9 @@ int main(int argc, char **argv)
     // set the loop rate used by spin to control while loop execution
     // this is an integer that equates to loops/second
     //
-    ros::Rate loop_rate = 10;
+    ros::Rate loop_rate = 5;
     //
-    // instantiate the subscriber for rest messages
+    // instantiate the subscriber for the raw image messages
     //
     ros::Subscriber image_sub = nh.subscribe("image_raw", 1000, getImage);
     //
@@ -80,7 +80,7 @@ int main(int argc, char **argv)
     int count = 0;
     ROS_INFO_STREAM("hit <Esc> to close image window...");
     ROS_INFO_STREAM("hit <Space> to track again...");
-    bool startTracking = false;
+    bool startTracking = true;
     bool trackingComplete = false;
     bool featuresInitialized = false;
     cv::Mat firstImage;
@@ -98,8 +98,8 @@ int main(int argc, char **argv)
     std::vector<uchar> forwardTrackedFeatures;
     std::vector<uchar> reverseTrackedFeatures;
     const int maxCorners = 500;
-    const double qualityLevel = .02;
-    const double minDistance = 5.0;
+    const double qualityLevel = .03;
+    const double minDistance = 10.0;
     const int blockSize = 5;
     bool useHarris = true;
     double harrisFreeParameter = .04;
@@ -108,7 +108,8 @@ int main(int argc, char **argv)
     double epsilon = .03;
     cv::TermCriteria termCrit;
     while(ros::ok()) {
-        if (startTracking && !trackingComplete) {
+
+        //if (startTracking && !trackingComplete) {
             //
             // capture first frame and find the good features to track
             // which will be used with successive images during tracking
@@ -155,12 +156,12 @@ int main(int argc, char **argv)
                     //
                     // done initializing, set the flag to true
                     //
-                    ROS_INFO_STREAM("initial features found...");
+                    //ROS_INFO_STREAM("initial features found...");
                     featuresInitialized = true;
                 }
             }
-            else if(count > 10) {
-                ROS_INFO_STREAM("count =  " << count);
+            else if(count > 5 && !trackingComplete) {
+
                 if(frame.rows > 0 && frame.cols > 0) {
                     //
                     // capture second frame and estimate the camera motion
@@ -273,7 +274,7 @@ int main(int argc, char **argv)
                         }
                     }
                     //
-                    // overlay the points onto the first color image and dispay it
+                    // overlay the points onto the first color image and display it
                     // use a for loop, draws lines between first points and
                     // second points, then show the image in
                     // a named window
@@ -292,50 +293,69 @@ int main(int argc, char **argv)
                     }
                 }
                 trackingComplete = true;
-                startTracking = false;
+                //startTracking = false;
                 ROS_INFO_STREAM("tracking complete...");
+                //count = 0;
+
+                //
+                // display the live image
+                //
+                if (frame.rows > 0 && frame.cols > 0) {
+                    cv::namedWindow( window_name_live,
+                                     cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+                    cv::imshow(window_name_live, frame);
+                    if (trackingComplete) {
+                        cv::namedWindow( window_name_forward_tracking,
+                                         cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+                        cv::imshow(window_name_forward_tracking, forwardTrackingImage);
+                        cv::namedWindow( window_name_reverse_tracking,
+                                         cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+                        cv::imshow(window_name_reverse_tracking, reverseTrackingImage);
+                        cv::namedWindow( window_name_verified_tracking,
+                                         cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+                        cv::imshow(window_name_verified_tracking, verifiedTrackingImage);
+                        std::vector<int> compression_params;
+                        compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
+                        compression_params.push_back(95);
+                        cv::imwrite("~/Pictures/verified_tracking_image.jpg",
+                                    verifiedTrackingImage,
+                                    compression_params);
+                    }
+                }
+
+            }
+            else if (count == 10){
+                featuresInitialized = false;
+                trackingComplete = false;
+                //startTracking = true;
                 count = 0;
             }
             else {
+                ROS_INFO_STREAM("count =  " << count);
                 ++count;
+
+                char c = (char)(cv::waitKey(1));
+                //
+                // if char is escape, break out of while loop
+                //
+                if (c == ESCAPE) {
+                    break;
+                }
+                //if (c == SPACE) {
+                    //featuresInitialized = false;
+                    //startTracking = true;
+                //}
+                //if (c == BACKSPACE) {
+                    //trackingComplete = false;
+                    //cv::destroyWindow(window_name_forward_tracking);
+                    //cv::destroyWindow(window_name_reverse_tracking);
+                    //cv::destroyWindow(window_name_verified_tracking);
+                //}
+
             }
-        }
-        //
-        // display the live image
-        //
-        if (frame.rows > 0 && frame.cols > 0) {
-            cv::namedWindow( window_name_live,
-                             cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
-            cv::imshow(window_name_live, frame);
-            if (trackingComplete) {
-                cv::namedWindow( window_name_forward_tracking,
-                                 cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
-                cv::imshow(window_name_forward_tracking, forwardTrackingImage);
-                cv::namedWindow( window_name_reverse_tracking,
-                                 cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
-                cv::imshow(window_name_reverse_tracking, reverseTrackingImage);
-                cv::namedWindow( window_name_verified_tracking,
-                                 cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
-                cv::imshow(window_name_verified_tracking, verifiedTrackingImage);
-            }
-        }
-        char c = (char)(cv::waitKey(10));
-        //
-        // if char is escape, break out of while loop
-        //
-        if (c == ESCAPE) {
-            break;
-        }
-        if (c == SPACE) {
-            featuresInitialized = false;
-            startTracking = true;
-        }
-        if (c == BACKSPACE) {
-            trackingComplete = false;
-            cv::destroyWindow(window_name_forward_tracking);
-            cv::destroyWindow(window_name_reverse_tracking);
-            cv::destroyWindow(window_name_verified_tracking);
-        }
+        //}
+
+
         ros::spinOnce();
         loop_rate.sleep();
     }
