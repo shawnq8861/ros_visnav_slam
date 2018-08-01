@@ -68,7 +68,7 @@ int main(int argc, char **argv)
     // set the loop rate used by spin to control while loop execution
     // this is an integer that equates to loops/second
     //
-    ros::Rate loop_rate = 5;
+    ros::Rate loop_rate = 10;
     //
     // instantiate the subscriber for the raw image messages
     //
@@ -79,8 +79,6 @@ int main(int argc, char **argv)
     //
     int count = 0;
     ROS_INFO_STREAM("hit <Esc> to close image window...");
-    ROS_INFO_STREAM("hit <Space> to track again...");
-    bool startTracking = true;
     bool trackingComplete = false;
     bool featuresInitialized = false;
     cv::Mat firstImage;
@@ -108,254 +106,238 @@ int main(int argc, char **argv)
     double epsilon = .03;
     cv::TermCriteria termCrit;
     while(ros::ok()) {
-
-        //if (startTracking && !trackingComplete) {
-            //
-            // capture first frame and find the good features to track
-            // which will be used with successive images during tracking
-            //
-            if (!featuresInitialized) {
-                if(frame.rows > 0 && frame.cols > 0) {
-                    frame.copyTo(firstImage);
-                    frame.copyTo(forwardTrackingImage);
-                    frame.copyTo(reverseTrackingImage);
-                    frame.copyTo(verifiedTrackingImage);
-                    //
-                    // convert to grayscale
-                    //
-                    cv::cvtColor(firstImage, firstGrayImg, cv::COLOR_BGR2GRAY);
-                    //
-                    // call good features to track to find corners
-                    //
-                    cv::goodFeaturesToTrack(firstGrayImg,
-                                            firstForwardPoints,
-                                            maxCorners,
-                                            qualityLevel,
-                                            minDistance,
-                                            cv::noArray(),
-                                            blockSize,
-                                            useHarris,
-                                            harrisFreeParameter
-                                            );
-                    //
-                    // refine pixel locations to subpixel accuracy
-                    //
-                    // set the half side length of the search window to 10
-                    // for a 20 x 20 search window
-                    //
-                    termCrit = cv::TermCriteria(
-                                cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS,
-                                maxCount,
-                                epsilon);
-                    cv::cornerSubPix(firstGrayImg,
-                                     firstForwardPoints,
-                                     cv::Size(searchWinSize, searchWinSize),
-                                     cv::Size(-1, -1),
-                                     termCrit
-                                     );
-                    //
-                    // done initializing, set the flag to true
-                    //
-                    //ROS_INFO_STREAM("initial features found...");
-                    featuresInitialized = true;
-                }
+        //
+        // capture first frame and find the good features to track
+        // which will be used with successive images during tracking
+        //
+        if (!featuresInitialized) {
+            if(frame.rows > 0 && frame.cols > 0) {
+                frame.copyTo(firstImage);
+                frame.copyTo(forwardTrackingImage);
+                frame.copyTo(reverseTrackingImage);
+                frame.copyTo(verifiedTrackingImage);
+                //
+                // convert to grayscale
+                //
+                cv::cvtColor(firstImage, firstGrayImg, cv::COLOR_BGR2GRAY);
+                //
+                // call good features to track to find corners
+                //
+                cv::goodFeaturesToTrack(firstGrayImg,
+                                        firstForwardPoints,
+                                        maxCorners,
+                                        qualityLevel,
+                                        minDistance,
+                                        cv::noArray(),
+                                        blockSize,
+                                        useHarris,
+                                        harrisFreeParameter
+                                        );
+                //
+                // refine pixel locations to subpixel accuracy
+                //
+                // set the half side length of the search window to 10
+                // for a 20 x 20 search window
+                //
+                termCrit = cv::TermCriteria(
+                            cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS,
+                            maxCount,
+                            epsilon);
+                cv::cornerSubPix(firstGrayImg,
+                                 firstForwardPoints,
+                                 cv::Size(searchWinSize, searchWinSize),
+                                 cv::Size(-1, -1),
+                                 termCrit
+                                 );
+                //
+                // done initializing, set the flag to true
+                //
+                featuresInitialized = true;
             }
-            else if(count > 5 && !trackingComplete) {
-
-                if(frame.rows > 0 && frame.cols > 0) {
+        }
+        else if(count > 5 && !trackingComplete) {
+            if(frame.rows > 0 && frame.cols > 0) {
+                //
+                // capture second frame and estimate the camera motion
+                // using pyramid Lucas-Kanade
+                //
+                frame.copyTo(secondImage);
+                //
+                // convert to grayscale
+                //
+                cv::cvtColor(secondImage, secondGrayImg, cv::COLOR_BGR2GRAY);
+                //
+                // call pyramid Lucas Kanade
+                //
+                int maxPyramidLevel = 5;
+                epsilon = .3;
+                termCrit = cv::TermCriteria(
+                            cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS,
+                            maxCount,
+                            epsilon);
+                cv::calcOpticalFlowPyrLK(firstGrayImg,
+                                         secondGrayImg,
+                                         firstForwardPoints,
+                                         secondForwardMatches,
+                                         forwardTrackedFeatures,
+                                         cv::noArray(),
+                                         cv::Size(searchWinSize * 2 + 1,
+                                                  searchWinSize * 2 + 1),
+                                         maxPyramidLevel,
+                                         termCrit
+                                         );
+                //
+                // now, find reverse matches
+                // use the matches from the first run as the starting point
+                // and then run pyramid lucas kanade with the images in
+                // reverse order.
+                //
+                // compare the forward and reverse point matches and
+                // only keep those that ocurred in both directions
+                //
+                // call pyramid Lucas Kanade
+                //
+                maxPyramidLevel = 5;
+                epsilon = .3;
+                termCrit = cv::TermCriteria(
+                            cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS,
+                            maxCount,
+                            epsilon);
+                cv::calcOpticalFlowPyrLK(secondGrayImg,
+                                         firstGrayImg,
+                                         secondForwardMatches,
+                                         firstReverseMatches,
+                                         reverseTrackedFeatures,
+                                         cv::noArray(),
+                                         cv::Size(searchWinSize * 2 + 1,
+                                                  searchWinSize * 2 + 1),
+                                         maxPyramidLevel,
+                                         termCrit
+                                         );
+                //
+                // compare the first set of starting features to the
+                // reverse matches, only keep points that match
+                //
+                for (int i = 0;
+                     i < static_cast<int>(secondForwardMatches.size());
+                     ++i) {
                     //
-                    // capture second frame and estimate the camera motion
-                    // using pyramid Lucas-Kanade
+                    // if a reverse match was found
                     //
-                    frame.copyTo(secondImage);
-                    //
-                    // convert to grayscale
-                    //
-                    cv::cvtColor(secondImage, secondGrayImg, cv::COLOR_BGR2GRAY);
-                    //
-                    // call pyramid Lucas Kanade
-                    //
-                    int maxPyramidLevel = 5;
-                    epsilon = .3;
-                    termCrit = cv::TermCriteria(
-                                cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS,
-                                maxCount,
-                                epsilon);
-                    cv::calcOpticalFlowPyrLK(firstGrayImg,
-                                             secondGrayImg,
-                                             firstForwardPoints,
-                                             secondForwardMatches,
-                                             forwardTrackedFeatures,
-                                             cv::noArray(),
-                                             cv::Size(searchWinSize * 2 + 1,
-                                                      searchWinSize * 2 + 1),
-                                             maxPyramidLevel,
-                                             termCrit
-                                             );
-                    //
-                    // now, find reverse matches
-                    // use the matches from the first run as the starting point
-                    // and then run pyramid lucas kanade with the images in
-                    // reverse order.
-                    //
-                    // compare the forward and reverse point matches and
-                    // only keep those that ocurred in both directions
-                    //
-                    // call pyramid Lucas Kanade
-                    //
-                    maxPyramidLevel = 5;
-                    epsilon = .3;
-                    termCrit = cv::TermCriteria(
-                                cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS,
-                                maxCount,
-                                epsilon);
-                    cv::calcOpticalFlowPyrLK(secondGrayImg,
-                                             firstGrayImg,
-                                             secondForwardMatches,
-                                             firstReverseMatches,
-                                             reverseTrackedFeatures,
-                                             cv::noArray(),
-                                             cv::Size(searchWinSize * 2 + 1,
-                                                      searchWinSize * 2 + 1),
-                                             maxPyramidLevel,
-                                             termCrit
-                                             );
-                    //
-                    // compare the first set of starting features to the
-                    // reverse matches, only keep points that match
-                    //
-                    for (int i = 0;
-                         i < static_cast<int>(secondForwardMatches.size());
-                         ++i) {
-                        //
-                        // if a reverse match was found
-                        //
-                        if (reverseTrackedFeatures[i] == 1) {
-                            if (comparePoints(firstForwardPoints[i], firstReverseMatches[i], (float)3.0)) {
-                                firstVerifiedPoints.push_back(firstReverseMatches[i]);
-                                secondVerifiedPoints.push_back(secondForwardMatches[i]);
-                            }
+                    if (reverseTrackedFeatures[i] == 1) {
+                        if (comparePoints(firstForwardPoints[i], firstReverseMatches[i], (float)10.0)) {
+                            firstVerifiedPoints.push_back(firstReverseMatches[i]);
+                            secondVerifiedPoints.push_back(secondForwardMatches[i]);
                         }
                     }
-                    //
-                    // overlay the points onto the first color image and dispay it
-                    // use a for loop, draws lines between first points and
-                    // second points, as long as a feature was found, draw
-                    // each line on the tracked image, then show the image in
-                    // a named window
-                    //
-                    cv::Scalar lineColorBlue(255, 0, 0);
-                    cv::Scalar lineColorRed(0, 0, 255);
-                    int lineThickness = 3;
-                    int lineType = cv::LINE_AA;
-                    for (int i = 0;
-                         i < static_cast<int>(firstForwardPoints.size());
-                         ++i) {
-                        if (forwardTrackedFeatures[i] == 1) {
-                            cv::line(forwardTrackingImage,
-                                     firstForwardPoints[i],
-                                     secondForwardMatches[i],
-                                     lineColorBlue,
-                                     lineThickness,
-                                     lineType
-                                     );
-                        }
-                        if (reverseTrackedFeatures[i] == 1) {
-                            cv::line(reverseTrackingImage,
-                                     secondForwardMatches[i],
-                                     firstReverseMatches[i],
-                                     lineColorRed,
-                                     lineThickness,
-                                     lineType
-                                     );
-                        }
-                        else {
-                            continue;
-                        }
-                    }
-                    //
-                    // overlay the points onto the first color image and display it
-                    // use a for loop, draws lines between first points and
-                    // second points, then show the image in
-                    // a named window
-                    //
-                    cv::Scalar lineColorGreen(0, 255, 0);
-                    for (int i = 0;
-                         i < static_cast<int>(firstVerifiedPoints.size());
-                         ++i) {
-                        cv::line(verifiedTrackingImage,
-                                 firstVerifiedPoints[i],
-                                 secondVerifiedPoints[i],
-                                 lineColorGreen,
+                }
+                //
+                // overlay the points onto the first color image and dispay it
+                // use a for loop, draws lines between first points and
+                // second points, as long as a feature was found, draw
+                // each line on the tracked image, then show the image in
+                // a named window
+                //
+                cv::Scalar lineColorBlue(255, 0, 0);
+                cv::Scalar lineColorRed(0, 0, 255);
+                int lineThickness = 3;
+                int lineType = cv::LINE_AA;
+                for (int i = 0;
+                     i < static_cast<int>(firstForwardPoints.size());
+                     ++i) {
+                    if (forwardTrackedFeatures[i] == 1) {
+                        cv::line(forwardTrackingImage,
+                                 firstForwardPoints[i],
+                                 secondForwardMatches[i],
+                                 lineColorBlue,
                                  lineThickness,
                                  lineType
                                  );
                     }
-                }
-                trackingComplete = true;
-                //startTracking = false;
-                ROS_INFO_STREAM("tracking complete...");
-                //count = 0;
-
-                //
-                // display the live image
-                //
-                if (frame.rows > 0 && frame.cols > 0) {
-                    cv::namedWindow( window_name_live,
-                                     cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
-                    cv::imshow(window_name_live, frame);
-                    if (trackingComplete) {
-                        cv::namedWindow( window_name_forward_tracking,
-                                         cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
-                        cv::imshow(window_name_forward_tracking, forwardTrackingImage);
-                        cv::namedWindow( window_name_reverse_tracking,
-                                         cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
-                        cv::imshow(window_name_reverse_tracking, reverseTrackingImage);
-                        cv::namedWindow( window_name_verified_tracking,
-                                         cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
-                        cv::imshow(window_name_verified_tracking, verifiedTrackingImage);
-                        std::vector<int> compression_params;
-                        compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
-                        compression_params.push_back(95);
-                        cv::imwrite("~/Pictures/verified_tracking_image.jpg",
-                                    verifiedTrackingImage,
-                                    compression_params);
+                    if (reverseTrackedFeatures[i] == 1) {
+                        cv::line(reverseTrackingImage,
+                                 secondForwardMatches[i],
+                                 firstReverseMatches[i],
+                                 lineColorRed,
+                                 lineThickness,
+                                 lineType
+                                 );
+                    }
+                    else {
+                        continue;
                     }
                 }
-
-            }
-            else if (count == 10){
-                featuresInitialized = false;
-                trackingComplete = false;
-                //startTracking = true;
-                count = 0;
-            }
-            else {
-                ROS_INFO_STREAM("count =  " << count);
-                ++count;
-
-                char c = (char)(cv::waitKey(1));
                 //
-                // if char is escape, break out of while loop
+                // overlay the points onto the first color image and display it
+                // use a for loop, draws lines between first points and
+                // second points, then show the image in
+                // a named window
                 //
-                if (c == ESCAPE) {
-                    break;
+                cv::Scalar lineColorGreen(0, 255, 0);
+                for (int i = 0;
+                     i < static_cast<int>(firstVerifiedPoints.size());
+                     ++i) {
+                    cv::line(verifiedTrackingImage,
+                             firstVerifiedPoints[i],
+                             secondVerifiedPoints[i],
+                             lineColorGreen,
+                             lineThickness,
+                             lineType
+                             );
                 }
-                //if (c == SPACE) {
-                    //featuresInitialized = false;
-                    //startTracking = true;
-                //}
-                //if (c == BACKSPACE) {
-                    //trackingComplete = false;
-                    //cv::destroyWindow(window_name_forward_tracking);
-                    //cv::destroyWindow(window_name_reverse_tracking);
-                    //cv::destroyWindow(window_name_verified_tracking);
-                //}
-
             }
-        //}
+            trackingComplete = true;
+            ROS_INFO_STREAM("tracking complete...");
+            //
+            // display the tracking images
+            //
+            if (frame.rows > 0 && frame.cols > 0) {
+                if (trackingComplete) {
+                    cv::namedWindow( window_name_forward_tracking,
+                                     cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+                    cv::imshow(window_name_forward_tracking, forwardTrackingImage);
+                    cv::namedWindow( window_name_reverse_tracking,
+                                     cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+                    cv::imshow(window_name_reverse_tracking, reverseTrackingImage);
+                    cv::namedWindow( window_name_verified_tracking,
+                                     cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+                    cv::imshow(window_name_verified_tracking, verifiedTrackingImage);
+                    //std::vector<int> compression_params;
+                    //compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
+                    //compression_params.push_back(95);
+                    //cv::imwrite("~/Pictures/verified_tracking_image.jpg",
+                                //verifiedTrackingImage,
+                                //compression_params);
+                }
+            }
 
-
+        }
+        else if (count == 10){
+            //
+            // clear the verified points vectors
+            //
+            firstVerifiedPoints.clear();
+            secondVerifiedPoints.clear();
+            featuresInitialized = false;
+            trackingComplete = false;
+            count = 0;
+        }
+        else {
+            ++count;
+            char c = (char)(cv::waitKey(1));
+            //
+            // if char is escape, break out of while loop
+            //
+            if (c == ESCAPE) {
+                break;
+            }
+            //
+            // display the live image
+            //
+            cv::namedWindow( window_name_live,
+                             cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
+            cv::imshow(window_name_live, frame);
+        }
         ros::spinOnce();
         loop_rate.sleep();
     }
