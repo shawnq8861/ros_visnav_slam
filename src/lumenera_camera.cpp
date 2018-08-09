@@ -1,7 +1,12 @@
 #include <ros/ros.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
+#include <sensor_msgs/SetCameraInfo.h>
+#include <sensor_msgs/CameraInfo.h>
+#include <sensor_msgs/RegionOfInterest.h>
+#include <camera_calibration_parsers/parse.h>
 #include <std_msgs/String.h>
+#include <std_msgs/Float64.h>
 #include <lumenera/lucamapi.h>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -14,10 +19,101 @@
 static ULONG imageWidth;
 static ULONG imageHeight;
 static cv::Mat frame;
+static sensor_msgs::CameraInfo cameraInfo;
+static const std::string cameraName = "lumenera_camera";
+static const std::string calibrationFileName = "calibration_params.yaml";
+
+//
+// service callback used to set camera calibration parameters and save
+// the values to a file
+//
+bool setAndSaveCameraCalibrationData(sensor_msgs::SetCameraInfo::Request &req,
+         sensor_msgs::SetCameraInfo::Response &resp)
+{
+    //
+    // set the camera info
+    //
+    cameraInfo.header.stamp = ros::Time::now();
+    cameraInfo.height = imageHeight;
+    cameraInfo.width = imageWidth;
+    cameraInfo.distortion_model = req.camera_info.distortion_model;
+    cameraInfo.D = req.camera_info.D;
+    cameraInfo.K = req.camera_info.K;
+    cameraInfo.R = req.camera_info.R;
+    cameraInfo.P = req.camera_info.P;
+    cameraInfo.binning_x = req.camera_info.binning_x;
+    cameraInfo.binning_y = req.camera_info.binning_y;
+    cameraInfo.roi = req.camera_info.roi;
+    //
+    // write data to yaml file
+    //
+    camera_calibration_parsers::writeCalibration(calibrationFileName,
+                                                 cameraName,
+                                                 cameraInfo);
+    //
+    // fill in the response object
+    //
+    resp.status_message = "calibration data set";
+
+    return true;
+}
+
+
+//
+// initialize the camera calibration parameters if the parameter file is
+// no found
+//
+// default values are all set to zero
+//
+bool initializeCameraCalibrationData(void)
+{
+    //
+    // read the data
+    //
+    if(camera_calibration_parsers::readCalibration(
+                calibrationFileName,
+                (std::string&)cameraName,
+                cameraInfo)) {
+        ROS_INFO_STREAM("calibration file read...");
+        return EXIT_SUCCESS;
+    }
+    else {
+        //
+        // set the camera info to default values
+        //
+        cameraInfo.header.stamp = ros::Time::now();
+        cameraInfo.height = imageHeight;
+        cameraInfo.width = imageWidth;
+        cameraInfo.distortion_model = "plumb_bob";
+        cameraInfo.binning_x = 0;
+        cameraInfo.binning_y = 0;
+        sensor_msgs::RegionOfInterest roi;
+        roi.height = imageHeight;
+        roi.width = imageWidth;
+        roi.x_offset = 0;
+        roi.y_offset = 0;
+        cameraInfo.roi = roi;
+        //
+        // write data to yaml file
+        //
+        bool retValue = camera_calibration_parsers::writeCalibration(
+                    calibrationFileName,
+                    cameraName,
+                    cameraInfo);
+        if(!retValue) {
+            return EXIT_FAILURE;
+        }
+        else {
+            return EXIT_SUCCESS;
+        }
+    }
+}
 
 //
 // subscribe to the save_image topic to be notified when to save an image
 // to a file
+//
+// TODO: convert this to a service
 //
 void saveImage(const std_msgs::String path)
 {
@@ -69,16 +165,32 @@ int main(int argc, char **argv)
     //
     // instantiate a publisher for camera images
     //
-    ros::Publisher image_pub = nh.advertise<sensor_msgs::Image>("image_raw", 10);
+    ros::Publisher image_pub =
+            nh.advertise<sensor_msgs::Image>("lumenera_camera/image_raw", 10);
+    //
+    // instantiate a publisher for camera calibration info
+    //
+    ros::Publisher camera_info_pub =
+            nh.advertise<sensor_msgs::CameraInfo>("lumenera_camera/camera_info", 10);
     //
     // set the loop rate used by spin to control while loop execution
     // this is an integer that equates to loops/second
     //
     ros::Rate loop_rate = 10;
     //
-    // instantiate the subscriber for rest messages
+    // instantiate the subscriber for save image messages
     //
-    ros::Subscriber save_image = nh.subscribe("save_image", 1000, saveImage);
+    ros::Subscriber save_image = nh.subscribe("lumenera_camera/save_image",
+                                              1000,
+                                              saveImage);
+
+
+    //
+    // instantiate a service to be called when after the camera calibrated
+    //
+    ros::ServiceServer calibration_service = nh.advertiseService(
+                "lumenera_camera/set_camera_info",
+                setAndSaveCameraCalibrationData);
     //
     // get the number of cameras
     //
@@ -105,6 +217,14 @@ int main(int argc, char **argv)
     conversionParams.CorrectionMatrix = LUCAM_CM_FLUORESCENT;
     conversionParams.DemosaicMethod = LUCAM_DM_HIGHER_QUALITY;
     //
+    // initialize camera calibration data
+    //
+    if(EXIT_FAILURE == initializeCameraCalibrationData()) {
+        ROS_ERROR_STREAM("calibration data initialization failed...");
+        return EXIT_FAILURE;
+    }
+
+    //
     // create vectors to hold image data
     //
     std::vector<unsigned char> rawImageData(imageHeight * imageWidth);
@@ -118,7 +238,6 @@ int main(int argc, char **argv)
     //
     // loop while acquiring image frames from the stream
     //
-    int count = 0;
     while(ros::ok()) {
         //
         // set one shot auto exposure target
@@ -165,9 +284,13 @@ int main(int argc, char **argv)
         //
         sensor_msgs::Image image;
         //
+        // update camera info time stamp
+        //
+        cameraInfo.header.stamp = ros::Time::now();
+        //
         // configure the image message
         //
-        image.header.stamp = ros::Time::now();
+        image.header.stamp = cameraInfo.header.stamp;
         image.data = rawImageData;
         image.height = imageHeight;
         image.width = imageWidth;
@@ -185,9 +308,12 @@ int main(int argc, char **argv)
                       rawImageData.data(),
                       cv::Mat::AUTO_STEP);
         //
+        // publish the camera info
+        //
+        camera_info_pub.publish(cameraInfo);
+        //
         // process callbacks and check for messages
         //
-        ++count;
         ros::spinOnce();
         loop_rate.sleep();
     }

@@ -4,6 +4,9 @@ project(ros-visnav-slam-cnn)
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
 
+set(OpenCV_DIR /usr/local/share/OpenCV)
+set(Eigen3_DIR /usr/lib/cmake/eigen3/)
+
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
@@ -11,6 +14,13 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   std_msgs
+  OpenCV REQUIRED
+  sensor_msgs
+  cv_bridge
+  image_transport
+  cmake_modules REQUIRED
+  Eigen3 REQUIRED
+  camera_calibration_parsers
 )
 
 ## System dependencies are found with CMake's conventions
@@ -115,6 +125,7 @@ catkin_package(
 
 set (lumenera_INCLUDE_DIRS "/usr/local/include/lumenara/")
 set (lumenera_LIBRARIES "/usr/lib/liblucamapi.so.2.3")
+set (Eigen3_INCLUDE_DIRS "/usr/local/include/Eigen/")
 
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
@@ -122,6 +133,8 @@ include_directories(
   include
   ${catkin_INCLUDE_DIRS}
   ${lumenera_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
+  ${Eigen3_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -140,6 +153,8 @@ include_directories(
 add_executable(pub_test_node src/pub_node.cpp)
 add_executable(sub_test_node src/sub_node.cpp)
 add_executable(lumenera_camera src/lumenera_camera.cpp)
+add_executable(optical_flow src/optical_flow.cpp)
+add_executable(structure_from_motion src/structure_from_motion.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -161,6 +176,15 @@ target_link_libraries(sub_test_node
 target_link_libraries(lumenera_camera
    ${catkin_LIBRARIES}
    ${lumenera_LIBRARIES}
+   ${OpenCV_LIBRARIES}
+)
+target_link_libraries(optical_flow
+   ${catkin_LIBRARIES}
+   ${OpenCV_LIBRARIES}
+)
+target_link_libraries(structure_from_motion
+   ${catkin_LIBRARIES}
+   ${OpenCV_LIBRARIES}
 )
 
 #############
