@@ -6,6 +6,7 @@ project(ros-visnav-slam-cnn)
 
 set(OpenCV_DIR /usr/local/share/OpenCV)
 set(Eigen3_DIR /usr/lib/cmake/eigen3/)
+set(CMAKE_CXX_FLAGS "-std=c++0x ${CMAKE_CXX_FLAGS}")
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -116,7 +117,7 @@ catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES pub_sub_demo
 #  CATKIN_DEPENDS roscpp rospy std_msgs
-#  DEPENDS system_lib
+  DEPENDS system_lib OpenCV
 )
 
 ###########

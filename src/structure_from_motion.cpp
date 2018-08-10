@@ -9,7 +9,7 @@
 #include <ros/ros.h>
 #include <camera_calibration_parsers/parse.h>
 #include <std_msgs/String.h>
-#include <std_msgs/Float32.h>
+#include <std_msgs/Int8.h>
 #include <string>
 #include <vector>
 #include <stdlib.h>
@@ -29,25 +29,22 @@ static cv::Matx33d cameraIntrinsics;
 // subscribe to the save_image topic to be notified when to save an image
 // to a file
 //
-void performReconstruction(std_msgs::Float32 focalLength)
+void performReconstruction(std_msgs::Int8 imageCount)
 {
     //
     // read in the images
     //
-    ROS_INFO_STREAM("focal length: " << focalLength);
-}
-
-int main(int argc, char **argv)
-{
-    ros::init(argc, argv, "structure_from_motion");
-    ros::NodeHandle nh;
+    ROS_INFO_STREAM("image count: " << imageCount.data);
+    //
+    // build the camera calibration matrix
+    //
     //
     // initialize the image file paths
     //
     char *home = getenv("HOME");
     std::string absolutePath = (std::string)home + relativePath;
     const std::string imageFileBase = "sfm_image";
-    for (int i = 0; i < numImages; ++i) {
+    for (int8_t i = 0; i < (imageCount.data); ++i) {
         std::stringstream number;
         number << (i + 1);
         std::string numberStr;
@@ -57,7 +54,43 @@ int main(int argc, char **argv)
         ROS_INFO_STREAM("file path" << i + 1 << ": " << imagePath);
         imagePaths.push_back(imagePath);
     }
-    ROS_INFO_STREAM("file path vector size: " << imagePaths.size());
+    //
+    // map 1 x 9 to 3 x 3
+    // 0,0 -> 0
+    // 1,1 -> 4
+    // 0,2 -> 2
+    // 1,2 -> 5
+    //
+    double fx = cameraInfo.K[0];
+    double fy = cameraInfo.K[4];
+    double cx = cameraInfo.K[2];
+    double cy = cameraInfo.K[5];
+    ROS_INFO_STREAM("fx = " << fx);
+    ROS_INFO_STREAM("fy = " << fy);
+    ROS_INFO_STREAM("cx = " << cx);
+    ROS_INFO_STREAM("cy = " << cy);
+    //
+    // build the camera calibration matrix
+    //
+    cameraIntrinsics = cv::Matx33d( fx, 0, cx,
+                                    0, fy, cy,
+                                    0, 0,  1);
+    bool is_projective = true;
+    std::vector<cv::Mat> Rs;
+    std::vector<cv::Mat> Ts;
+    std::vector<cv::Mat> points3d;
+    cv::sfm::reconstruct(imagePaths,
+                         Rs,
+                         Ts,
+                         cameraIntrinsics,
+                         points3d,
+                         is_projective);
+}
+
+int main(int argc, char **argv)
+{
+    ros::init(argc, argv, "structure_from_motion");
+    ros::NodeHandle nh;
     //
     // get the camera Info
     //
@@ -67,13 +100,6 @@ int main(int argc, char **argv)
                 cameraInfo)) {
         ROS_INFO_STREAM("calibration file read...");
     }
-    //
-    // build the camera calibration matrix
-    //
-    cv::Matx33d K = cv::Matx33d( f, 0, cx,
-                                 0, f, cy,
-                                 0, 0,  1);
-
     //
     // set the loop rate used by spin to control while loop execution
     // this is an integer that equates to loops/second
