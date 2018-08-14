@@ -302,12 +302,6 @@ int main(int argc, char **argv)
                     cv::namedWindow( window_name_verified_tracking,
                                      cv::WINDOW_NORMAL || cv::WINDOW_KEEPRATIO);
                     cv::imshow(window_name_verified_tracking, verifiedTrackingImage);
-                    //std::vector<int> compression_params;
-                    //compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
-                    //compression_params.push_back(95);
-                    //cv::imwrite("~/Pictures/verified_tracking_image.jpg",
-                                //verifiedTrackingImage,
-                                //compression_params);
                 }
             }
 

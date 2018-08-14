@@ -182,15 +182,15 @@ int main(int argc, char **argv)
     //
     ros::Subscriber save_image = nh.subscribe("lumenera_camera/save_image",
                                               1000,
-                                              saveImage);
+                                              &saveImage);
 
 
     //
-    // instantiate a service to be called when after the camera calibrated
+    // instantiate a service to be called after the camera calibrated
     //
     ros::ServiceServer calibration_service = nh.advertiseService(
                 "lumenera_camera/set_camera_info",
-                setAndSaveCameraCalibrationData);
+                &setAndSaveCameraCalibrationData);
     //
     // get the number of cameras
     //
