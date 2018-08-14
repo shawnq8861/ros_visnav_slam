@@ -124,7 +124,7 @@ catkin_package(
 ## Build ##
 ###########
 
-set (lumenera_INCLUDE_DIRS "/usr/local/include/lumenara/")
+set (lumenera_INCLUDE_DIRS "/usr/include/lumenara/")
 set (lumenera_LIBRARIES "/usr/lib/liblucamapi.so.2.3")
 set (Eigen3_INCLUDE_DIRS "/usr/local/include/Eigen/")
 
