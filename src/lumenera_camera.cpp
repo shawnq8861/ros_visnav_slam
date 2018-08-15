@@ -217,6 +217,19 @@ int main(int argc, char **argv)
     conversionParams.CorrectionMatrix = LUCAM_CM_FLUORESCENT;
     conversionParams.DemosaicMethod = LUCAM_DM_HIGHER_QUALITY;
     //
+    // display current frame rate
+    //
+    ROS_INFO_STREAM("current frame rate: " << frameRate);
+    //
+    // set new frame rate
+    //
+    LucamSetFormat(hCamera, &frameFormat, 30.0);
+    //
+    // display current frame rate
+    //
+    LucamGetFormat(hCamera, &frameFormat, &frameRate);
+    ROS_INFO_STREAM("current frame rate: " << frameRate);
+    //
     // initialize camera calibration data
     //
     if(EXIT_FAILURE == initializeCameraCalibrationData()) {

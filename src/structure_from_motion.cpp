@@ -10,12 +10,16 @@
 #include <camera_calibration_parsers/parse.h>
 #include <std_msgs/String.h>
 #include <std_msgs/Int8.h>
+#include <pcl_ros/point_cloud.h>
+#include <pcl_conversions/pcl_conversions.h>
 #include <string>
 #include <vector>
 #include <stdlib.h>
 #include <sstream>
 #define CERES_FOUND 1
 #include <opencv2/sfm.hpp>
+
+typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
 
 static sensor_msgs::CameraInfo cameraInfo;
 static const std::string cameraName = "lumenera_camera";
@@ -24,6 +28,8 @@ static const int numImages = 3;
 static const std::string relativePath = "/Pictures/SFM/";
 static std::vector<cv::String> imagePaths;
 static cv::Matx33d cameraIntrinsics;
+static std::vector<cv::Mat> points3d;
+static PointCloud pointCloud;
 
 //
 // subscribe to the save_image topic to be notified when to save an image
@@ -77,7 +83,7 @@ void performReconstruction(std_msgs::Int8 imageCount)
     bool is_projective = true;
     std::vector<cv::Mat> Rs;
     std::vector<cv::Mat> Ts;
-    std::vector<cv::Mat> points3d;
+    //std::vector<cv::Mat> points3d;
     ROS_INFO_STREAM("fx = " << K(0,0));
     ROS_INFO_STREAM("cx = " << K(0,2));
     ROS_INFO_STREAM("fy = " << K(1,1));
@@ -89,6 +95,10 @@ void performReconstruction(std_msgs::Int8 imageCount)
                          K,
                          points3d,
                          is_projective);
+    pointCloud.header.frame_id = "some_tf_frame";
+    pointCloud.height = 1;
+    pointCloud.width = 1;
+    pointCloud.points.push_back(pcl::PointXYZ(1.0, 2.0, 3.0));
 }
 
 int main(int argc, char **argv)
@@ -115,7 +125,13 @@ int main(int argc, char **argv)
     ros::Subscriber reconstruct_sub = nh.subscribe("structure_from_motion/reconstruct",
                                               1000,
                                               &performReconstruction);
-
+    //
+    // fill the point cloud and publish it
+    //
+    //PointCloud::Ptr msg (new PointCloud);
+    //msg->header.frame_id = "some_tf_frame";
+    //msg->height = msg->width = 1;
+    //msg->points.push_back (pcl::PointXYZ(1.0, 2.0, 3.0));
     //
     // loop while waiting for publisher to request reconstruction
     //
