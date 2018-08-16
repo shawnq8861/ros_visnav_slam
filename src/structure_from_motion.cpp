@@ -12,6 +12,7 @@
 #include <std_msgs/Int8.h>
 #include <pcl_ros/point_cloud.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <sensor_msgs/PointCloud2.h>
 #include <string>
 #include <vector>
 #include <stdlib.h>
@@ -19,7 +20,7 @@
 #define CERES_FOUND 1
 #include <opencv2/sfm.hpp>
 
-typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
+//typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
 
 static sensor_msgs::CameraInfo cameraInfo;
 static const std::string cameraName = "lumenera_camera";
@@ -29,7 +30,8 @@ static const std::string relativePath = "/Pictures/SFM/";
 static std::vector<cv::String> imagePaths;
 static cv::Matx33d cameraIntrinsics;
 static std::vector<cv::Mat> points3d;
-static PointCloud pointCloud;
+//static PointCloud pointCloud;
+static sensor_msgs::PointCloud2 pointCloud;
 
 //
 // subscribe to the save_image topic to be notified when to save an image
@@ -84,21 +86,42 @@ void performReconstruction(std_msgs::Int8 imageCount)
     std::vector<cv::Mat> Rs;
     std::vector<cv::Mat> Ts;
     //std::vector<cv::Mat> points3d;
-    ROS_INFO_STREAM("fx = " << K(0,0));
-    ROS_INFO_STREAM("cx = " << K(0,2));
-    ROS_INFO_STREAM("fy = " << K(1,1));
-    ROS_INFO_STREAM("cy = " << K(1,2));
-    ROS_INFO_STREAM("K[2,0] = " << K(2,0));
+    //ROS_INFO_STREAM("fx = " << K(0,0));
+    //ROS_INFO_STREAM("cx = " << K(0,2));
+    //ROS_INFO_STREAM("fy = " << K(1,1));
+    //ROS_INFO_STREAM("cy = " << K(1,2));
+    //ROS_INFO_STREAM("K[2,0] = " << K(2,0));
+    int dataWidth = points3d.size();
+    ROS_INFO_STREAM("number of points: " << dataWidth);
     cv::sfm::reconstruct(imagePaths,
                          Rs,
                          Ts,
                          K,
                          points3d,
                          is_projective);
-    pointCloud.header.frame_id = "some_tf_frame";
+    pointCloud.header.frame_id = "sfm_tf_frame";
+    pointCloud.header.stamp = ros::Time::now();
     pointCloud.height = 1;
-    pointCloud.width = 1;
-    pointCloud.points.push_back(pcl::PointXYZ(1.0, 2.0, 3.0));
+    pointCloud.width = dataWidth;
+    //
+    // finish initializing:
+    //
+    // bool    is_bigendian # Is this data bigendian?
+    // uint32  point_step   # Length of a point in bytes
+    // uint32  row_step     # Length of a row in bytes
+    // uint8[] data         # Actual point data, size is (row_step*height)
+    // bool is_dense        # True if there are no invalid points
+    //
+    pointCloud.is_bigendian = false;
+
+    for (int index = 0; index < dataWidth; ++index) {
+        //
+        // assign the points3D values to the x, y, z fields
+        // in the point cloud
+        //
+
+    }
+    //pointCloud.points.push_back(pcl::PointXYZ(1.0, 2.0, 3.0));
 }
 
 int main(int argc, char **argv)
