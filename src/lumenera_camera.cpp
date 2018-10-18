@@ -7,6 +7,7 @@
 #include <camera_calibration_parsers/parse.h>
 #include <std_msgs/String.h>
 #include <std_msgs/Float64.h>
+#include <ros_visnav_slam/SaveImage.h>
 #include <lumenera/lucamapi.h>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -15,6 +16,9 @@
 #include <unistd.h>
 #include <libgen.h>
 #include <string.h>
+#include <pwd.h>
+
+#define     TARGET_BRIGHTNESS   25
 
 static ULONG imageWidth;
 static ULONG imageHeight;
@@ -57,7 +61,6 @@ bool setAndSaveCameraCalibrationData(sensor_msgs::SetCameraInfo::Request &req,
 
     return true;
 }
-
 
 //
 // initialize the camera calibration parameters if the parameter file is
@@ -110,42 +113,70 @@ bool initializeCameraCalibrationData(void)
 }
 
 //
-// subscribe to the save_image topic to be notified when to save an image
-// to a file
+// service to the save an image to a file
 //
-// TODO: convert this to a service
-//
-void saveImage(const std_msgs::String path)
+bool saveImageCB(ros_visnav_slam::SaveImageRequest& request,
+                 ros_visnav_slam::SaveImageResponse& response)
 {
     //
     // extract the directory and base name from the path
     //
-    ROS_INFO_STREAM("saved file path: " << path);
-    std::string pathStr = path.data;
-    char *pathCopy = strdup(pathStr.c_str());
-    char *baseName = basename(pathCopy);
-    char *dirName = dirname(pathCopy);
+    ROS_INFO_STREAM("saved file folder: " << request.saved_file_path);
+    std::string folderStr = request.saved_file_path;
+    const char *folderPtr = folderStr.c_str();
+    //
+    // if file path starts with '~', strip off and prepend home path
+    //
+    struct passwd *pw = getpwuid(getuid());
+    char *homeDir = pw->pw_dir;
+    ROS_INFO_STREAM("home dir: " << homeDir);
+    const char *tilde = "~";
+    char *filePath = nullptr;
+    char firstChar = folderPtr[0];
+    ROS_INFO_STREAM("first char: " << firstChar);
+    ROS_INFO_STREAM("strncmp result: " << strncmp(tilde, &firstChar, 1));
+    if (0 == strncmp(tilde, &firstChar, 1)) {
+        ROS_INFO_STREAM("starts with ~");
+        //
+        // split string and re-assemble
+        //
+        folderPtr = &folderPtr[1];
+        ROS_INFO_STREAM("~ removed: " << folderPtr);
+        filePath = strcat(homeDir, folderPtr);
+    }
+    else {
+        filePath = (char *)folderStr.c_str();
+    }
+    ROS_INFO_STREAM("final path: " << filePath);
+    char *folderCopy = strdup(filePath);
+    char *fileName = basename(folderCopy);
+    ROS_INFO_STREAM("file name:" << fileName);
+    char *folderName = dirname(folderCopy);
+    ROS_INFO_STREAM("folder: " << folderName);
     //
     // check file extension
     //
     std::string fileExt = ".jpg";
-    std::string baseStr(baseName);
-    size_t pos = baseStr.find_first_of(".");
-    std::string baseExt = baseStr.substr(pos);
-    if (0 != strcmp(fileExt.c_str(), baseExt.c_str())) {
+    std::string nameStr(fileName);
+    size_t pos = nameStr.find_first_of(".");
+    std::string nameExt = nameStr.substr(pos);
+    if (0 != strcmp(fileExt.c_str(), nameExt.c_str())) {
         ROS_INFO_STREAM("usage:  please use file extension .jpg...");
     }
     //
     // create the directory if it does not exist
     //
     struct stat statBuff;
-    int dirFound = stat(dirName, &statBuff);
-    if (dirFound == -1) {
+    int folderFound = stat(folderName, &statBuff);
+    if (folderFound == -1) {
         ROS_INFO_STREAM("directory does not exist, creating...");
-        int dirCreated = mkdir(dirName, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+        int dirCreated = mkdir(folderName, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
         if (dirCreated == -1) {
             ROS_INFO_STREAM("mkdir failed...");
         }
+    }
+    else {
+        ROS_INFO_STREAM("folder found...");
     }
     cv::Mat saveFrame(cv::Size(imageWidth, imageHeight),CV_8UC3);
     cv::cvtColor(frame, saveFrame, cv::COLOR_BayerBG2RGB);
@@ -153,9 +184,13 @@ void saveImage(const std_msgs::String path)
     compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
     compression_params.push_back(95);
     ROS_INFO_STREAM("saving frame...");
-    cv::imwrite(path.data,
+    cv::imwrite(filePath,
                 saveFrame,
                 compression_params);
+
+    response.result = true;
+
+    return true;
 }
 
 int main(int argc, char **argv)
@@ -178,13 +213,11 @@ int main(int argc, char **argv)
     //
     ros::Rate loop_rate = 10;
     //
-    // instantiate the subscriber for save image messages
+    // instantiate a service to be called to save an image to file
     //
-    ros::Subscriber save_image = nh.subscribe("lumenera_camera/save_image",
-                                              1000,
-                                              &saveImage);
-
-
+    ros::ServiceServer save_image_service = nh.advertiseService(
+                "lumenera_camera/save_image",
+                &saveImageCB);
     //
     // instantiate a service to be called after the camera calibrated
     //
@@ -255,7 +288,7 @@ int main(int argc, char **argv)
         //
         // set one shot auto exposure target
         //
-        UCHAR brightnessTarget = 90;
+        UCHAR brightnessTarget = TARGET_BRIGHTNESS;
         ULONG startX = 0;
         ULONG startY = 0;
         //

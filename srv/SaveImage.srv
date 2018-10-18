@@ -1,4 +1,5 @@
-int64 a
-int64 b
+# new goal position request
+string saved_file_path
 ---
-int64 sum
+# response
+int8 result

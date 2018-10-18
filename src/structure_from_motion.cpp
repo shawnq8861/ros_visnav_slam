@@ -113,6 +113,10 @@ void performReconstruction(std_msgs::Int8 imageCount)
     // bool is_dense        # True if there are no invalid points
     //
     pointCloud.is_bigendian = false;
+    pointCloud.point_step = 1;
+    //
+    // need to get the bit depth and image height anf width
+    //
 
     for (int index = 0; index < dataWidth; ++index) {
         //
