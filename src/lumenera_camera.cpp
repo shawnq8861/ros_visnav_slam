@@ -18,7 +18,7 @@
 #include <string.h>
 #include <pwd.h>
 
-#define     TARGET_BRIGHTNESS   25
+#define     TARGET_BRIGHTNESS   75
 
 static ULONG imageWidth;
 static ULONG imageHeight;
