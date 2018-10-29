@@ -22,10 +22,12 @@
 #include <opencv2/sfm.hpp>
 #include <opencv2/core.hpp>
 #include <mutex>
+#include <pwd.h>
+
+#define CHAR_BUFFER_SIZE        100
 
 static sensor_msgs::CameraInfo cameraInfo;
 static const std::string cameraName = "lumenera_camera";
-static const std::string calibrationFileName = "calibration_params.yaml";
 static const std::string relativePath = "/Pictures/SFM/";
 static const std::string frame_id = "cloud_frame";
 static std::vector<cv::String> imagePaths;
@@ -33,6 +35,58 @@ static cv::Matx33d cameraIntrinsics;
 static sensor_msgs::PointCloud2 pointCloud2;
 static pcl::PointCloud<pcl::PointXYZ> pointCloud;
 static std::mutex point_cloud_mtx;
+static const char *calibrationFolderName =
+        "/catkin_ws/src/ros_visnav_slam/data/";
+static const char *calibrationFileName = "calibration_params.yaml";
+static char calibrationFilePath[CHAR_BUFFER_SIZE];
+
+//
+// helper function that checks calibration file path, and creates the
+// directory if it does not exist
+//
+bool checkCalibrationFilePath(void)
+{
+    //
+    // get the home directory
+    //
+    struct passwd *pw = getpwuid(getuid());
+    char *homeDir = pw->pw_dir;
+    //
+    // build up the file path
+    //
+    // first home home directory
+    //
+    strcpy(calibrationFilePath, homeDir);
+    //
+    // next directory path
+    //
+    strcat(calibrationFilePath, calibrationFolderName);
+    ROS_INFO_STREAM("folder dir: " << calibrationFilePath);
+    //
+    // create the directory if it does not exist
+    //
+    struct stat statBuff;
+    int folderFound = stat(calibrationFilePath, &statBuff);
+    if (folderFound == -1) {
+        ROS_INFO_STREAM("directory does not exist, creating...");
+        int dirCreated = mkdir(calibrationFilePath,
+                               S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+        if (dirCreated == -1) {
+            ROS_INFO_STREAM("mkdir failed...");
+            return false;
+        }
+    }
+    else {
+        ROS_INFO_STREAM("folder found...");
+    }
+    //
+    // and finally the file name
+    //
+    strcat(calibrationFilePath, calibrationFileName);
+    ROS_INFO_STREAM("calibration file path: " << calibrationFilePath);
+
+    return true;
+}
 
 //
 // subscribe to the save_image topic to be notified when to save an image
@@ -69,12 +123,9 @@ void performReconstruction(std_msgs::Int8 imageCount)
     // 0,2 -> 2
     // 1,2 -> 5
     //
-    //double fx = cameraInfo.K[0];
-    //double fy = cameraInfo.K[4];
-    //double cx = cameraInfo.K[2];
-    //double cy = cameraInfo.K[5];
     // use the values from the example
     // ./example_sfm_scene_reconstruction image_paths_file.txt 350 240 360
+    //
     double fx = 350;
     double fy = 350;
     double cx = 240;
@@ -144,29 +195,7 @@ void performReconstruction(std_msgs::Int8 imageCount)
     pcl::toROSMsg(pointCloud, pointCloud2);
     point_cloud_mtx.unlock();
     //
-    // print out the structure members to verify conversion
-    //
-    //
-    // Time of sensor data acquisition, and the coordinate frame ID (for 3d
-    // points).
-    // Header header
-    //
-    // 2D structure of the point cloud. If the cloud is unordered, height is
-    // 1 and width is the length of the point cloud.
-    // uint32 height
-    // uint32 width
-    //
-    // Describes the channels and their layout in the binary data blob.
-    // PointField[] fields
-    //
-    // bool    is_bigendian # Is this data bigendian?
-    // uint32  point_step   # Length of a point in bytes
-    // uint32  row_step     # Length of a row in bytes
-    // uint8[] data         # Actual point data, size is (row_step*height)
-    //
-    // bool is_dense        # True if there are no invalid points
-    //
-    // set the time stamp
+    // set the frame id and time stamp
     //
     point_cloud_mtx.lock();
     pointCloud2.header.frame_id = frame_id;
@@ -178,10 +207,6 @@ void performReconstruction(std_msgs::Int8 imageCount)
     ROS_INFO_STREAM("width: " << pointCloud2.width);
     ROS_INFO_STREAM("point step: " << pointCloud2.point_step);
     ROS_INFO_STREAM("row step: " << pointCloud2.row_step);
-    //
-    // try displaying in a viz window
-    //
-
 }
 
 int main(int argc, char **argv)
@@ -189,10 +214,16 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "structure_from_motion");
     ros::NodeHandle nh;
     //
+    // check the calibration file path, return if not valid
+    //
+    if (!checkCalibrationFilePath()) {
+        return EXIT_FAILURE;
+    }
+    //
     // get the camera Info
     //
     if(camera_calibration_parsers::readCalibration(
-                calibrationFileName,
+                calibrationFilePath,
                 (std::string&)cameraName,
                 cameraInfo)) {
         ROS_INFO_STREAM("calibration file read...");
