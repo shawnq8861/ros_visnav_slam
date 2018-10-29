@@ -17,15 +17,70 @@
 #include <libgen.h>
 #include <string.h>
 #include <pwd.h>
+#include <mutex>
 
-#define     TARGET_BRIGHTNESS   75
+#define TARGET_BRIGHTNESS       60
+#define STABILIZATION_COUNT     10
+#define LOOP_AND_FRAME_RATE     30.0
+#define CHAR_BUFFER_SIZE        100
 
 static ULONG imageWidth;
 static ULONG imageHeight;
 static cv::Mat frame;
 static sensor_msgs::CameraInfo cameraInfo;
 static const std::string cameraName = "lumenera_camera";
-static const std::string calibrationFileName = "calibration_params.yaml";
+static const char *calibrationFolderName =
+        "/catkin_ws/src/ros_visnav_slam/data/";
+static const char *calibrationFileName = "calibration_params.yaml";
+static char calibrationFilePath[CHAR_BUFFER_SIZE];
+
+//
+// helper function that checks calibration file path, and creates the
+// directory if it does not exist
+//
+bool checkCalibrationFilePath(void)
+{
+    //
+    // get the home directory
+    //
+    struct passwd *pw = getpwuid(getuid());
+    char *homeDir = pw->pw_dir;
+    //
+    // build up the file path
+    //
+    // first home home directory
+    //
+    strcpy(calibrationFilePath, homeDir);
+    //
+    // next directory path
+    //
+    strcat(calibrationFilePath, calibrationFolderName);
+    ROS_INFO_STREAM("folder dir: " << calibrationFilePath);
+    //
+    // create the directory if it does not exist
+    //
+    struct stat statBuff;
+    int folderFound = stat(calibrationFilePath, &statBuff);
+    if (folderFound == -1) {
+        ROS_INFO_STREAM("directory does not exist, creating...");
+        int dirCreated = mkdir(calibrationFilePath,
+                               S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+        if (dirCreated == -1) {
+            ROS_INFO_STREAM("mkdir failed...");
+            return false;
+        }
+    }
+    else {
+        ROS_INFO_STREAM("folder found...");
+    }
+    //
+    // and finally the file name
+    //
+    strcat(calibrationFilePath, calibrationFileName);
+    ROS_INFO_STREAM("calibration file path: " << calibrationFilePath);
+
+    return true;
+}
 
 //
 // service callback used to set camera calibration parameters and save
@@ -51,7 +106,7 @@ bool setAndSaveCameraCalibrationData(sensor_msgs::SetCameraInfo::Request &req,
     //
     // write data to yaml file
     //
-    camera_calibration_parsers::writeCalibration(calibrationFileName,
+    camera_calibration_parsers::writeCalibration(calibrationFilePath,
                                                  cameraName,
                                                  cameraInfo);
     //
@@ -74,7 +129,7 @@ bool initializeCameraCalibrationData(void)
     // read the data
     //
     if(camera_calibration_parsers::readCalibration(
-                calibrationFileName,
+                calibrationFilePath,
                 (std::string&)cameraName,
                 cameraInfo)) {
         ROS_INFO_STREAM("calibration file read...");
@@ -100,7 +155,7 @@ bool initializeCameraCalibrationData(void)
         // write data to yaml file
         //
         bool retValue = camera_calibration_parsers::writeCalibration(
-                    calibrationFileName,
+                    calibrationFilePath,
                     cameraName,
                     cameraInfo);
         if(!retValue) {
@@ -187,7 +242,6 @@ bool saveImageCB(ros_visnav_slam::SaveImageRequest& request,
     cv::imwrite(filePath,
                 saveFrame,
                 compression_params);
-
     response.result = true;
 
     return true;
@@ -197,6 +251,12 @@ int main(int argc, char **argv)
 {
     ros::init(argc, argv, "lumenera_camera");
     ros::NodeHandle nh;
+    //
+    // check the calibration file path, return if not valid
+    //
+    if (!checkCalibrationFilePath()) {
+        return EXIT_FAILURE;
+    }
     //
     // instantiate a publisher for camera images
     //
@@ -211,7 +271,7 @@ int main(int argc, char **argv)
     // set the loop rate used by spin to control while loop execution
     // this is an integer that equates to loops/second
     //
-    ros::Rate loop_rate = 10;
+    ros::Rate loop_rate = LOOP_AND_FRAME_RATE;
     //
     // instantiate a service to be called to save an image to file
     //
@@ -256,7 +316,7 @@ int main(int argc, char **argv)
     //
     // set new frame rate
     //
-    LucamSetFormat(hCamera, &frameFormat, 30.0);
+    LucamSetFormat(hCamera, &frameFormat, LOOP_AND_FRAME_RATE);
     //
     // display current frame rate
     //
@@ -269,7 +329,6 @@ int main(int argc, char **argv)
         ROS_ERROR_STREAM("calibration data initialization failed...");
         return EXIT_FAILURE;
     }
-
     //
     // create vectors to hold image data
     //
@@ -277,13 +336,13 @@ int main(int argc, char **argv)
     //
     // start the video stream, NULL window handle
     //
-    if (LucamStreamVideoControl(hCamera, START_STREAMING, NULL) == FALSE)
-    {
+    if (LucamStreamVideoControl(hCamera, START_STREAMING, NULL) == FALSE) {
        ROS_INFO_STREAM("Failed to start streaming");
     }
     //
     // loop while acquiring image frames from the stream
     //
+    int count = 0;
     while(ros::ok()) {
         //
         // set one shot auto exposure target
@@ -321,42 +380,55 @@ int main(int argc, char **argv)
         // grab a snap shot
         //
         LONG singleFrame = 1;
-        if(LucamTakeVideo(hCamera, singleFrame, (BYTE *)rawImageData.data()) == FALSE)
-        {
+        if(LucamTakeVideo(hCamera, singleFrame, (BYTE *)rawImageData.data()) == FALSE) {
             ROS_ERROR_STREAM("Failed to capture image");
         }
         //
-        // declare an image message object to hold the data
+        // allow the auto settings to settle before transferring image data
         //
-        sensor_msgs::Image image;
-        //
-        // update camera info time stamp
-        //
-        cameraInfo.header.stamp = ros::Time::now();
-        //
-        // configure the image message
-        //
-        image.header.stamp = cameraInfo.header.stamp;
-        image.data = rawImageData;
-        image.height = imageHeight;
-        image.width = imageWidth;
-        image.step = imageWidth;
-        image.encoding = sensor_msgs::image_encodings::BAYER_BGGR8;
-        //
-        // publish the image to an image_view data type
-        //
-        image_pub.publish(image);
-        //
-        // save the snap shot to OpenCV Mat
-        //
-        frame = cv::Mat(cv::Size(imageWidth, imageHeight),
-                      CV_8UC1,
-                      rawImageData.data(),
-                      cv::Mat::AUTO_STEP);
-        //
-        // publish the camera info
-        //
-        camera_info_pub.publish(cameraInfo);
+        if (count == STABILIZATION_COUNT) {
+            //
+            // reset the counter
+            //
+            count = 0;
+            //
+            // declare an image message object to hold the data
+            //
+            sensor_msgs::Image image;
+            //
+            // update camera info time stamp
+            //
+            cameraInfo.header.stamp = ros::Time::now();
+            //
+            // configure the image message
+            //
+            image.header.stamp = cameraInfo.header.stamp;
+            image.data = rawImageData;
+            image.height = imageHeight;
+            image.width = imageWidth;
+            image.step = imageWidth;
+            image.encoding = sensor_msgs::image_encodings::BAYER_BGGR8;
+            //
+            // publish the image to an image_view data type
+            //
+            image_pub.publish(image);
+            //
+            // save the snap shot to OpenCV Mat
+            //
+            frame = cv::Mat(cv::Size(imageWidth, imageHeight),
+                          CV_8UC1,
+                          rawImageData.data(),
+                          cv::Mat::AUTO_STEP);
+            //
+            // publish the image to an image_view data type
+            //
+            image_pub.publish(image);
+            //
+            // publish the camera info
+            //
+            camera_info_pub.publish(cameraInfo);
+        }
+        ++count;
         //
         // process callbacks and check for messages
         //

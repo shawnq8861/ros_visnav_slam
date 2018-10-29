@@ -1,0 +1,20 @@
+image_width: 4112
+image_height: 2176
+camera_name: lumenera_camera
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [0, 0, 0, 0, 0, 0, 0, 0, 0]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 0
+  data: []
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [0, 0, 0, 0, 0, 0, 0, 0, 0]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
