@@ -18,6 +18,7 @@
 #include <string.h>
 #include <pwd.h>
 #include <mutex>
+#include <boost/filesystem.hpp>
 
 #define TARGET_BRIGHTNESS       60
 #define STABILIZATION_COUNT     10
@@ -62,11 +63,11 @@ bool checkCalibrationFilePath(void)
     struct stat statBuff;
     int folderFound = stat(calibrationFilePath, &statBuff);
     if (folderFound == -1) {
-        ROS_INFO_STREAM("directory does not exist, creating...");
-        int dirCreated = mkdir(calibrationFilePath,
-                               S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-        if (dirCreated == -1) {
-            ROS_INFO_STREAM("mkdir failed...");
+        if (boost::filesystem::create_directory(calibrationFilePath)) {
+            ROS_INFO_STREAM("data directory created");
+        }
+        else {
+            ROS_INFO_STREAM("could not create data directory");
             return false;
         }
     }
