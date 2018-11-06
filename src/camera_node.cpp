@@ -10,7 +10,7 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "camera_node");
     ros::NodeHandle nh;
     //
-    // code to alllow loading the nodelet plugin dynamically form a running node
+    // code to allow loading the nodelet plugin dynamically form a running node
     //
     std::string nodelet_name = "camera_nodelet";
     std::string nodelet_topic = "/in";
@@ -24,6 +24,9 @@ int main(int argc, char **argv)
     ros::Rate loop_rate = 1;
     std_msgs::String message;
     message.data = "hello from camera node";
+    //
+    // spin the node, publish the node message
+    //
     while (ros::ok()) {
         test_pub.publish(message);
         ros::spinOnce();
