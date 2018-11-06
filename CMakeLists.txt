@@ -14,6 +14,7 @@ set(CMAKE_CXX_FLAGS "-std=c++0x ${CMAKE_CXX_FLAGS}")
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
+  nodelet
   std_msgs
   OpenCV REQUIRED
   sensor_msgs
@@ -116,8 +117,8 @@ generate_messages(
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-#  LIBRARIES pub_sub_demo
-#  CATKIN_DEPENDS roscpp rospy std_msgs
+  LIBRARIES nodelet_camera
+  CATKIN_DEPENDS roscpp rospy std_msgs nodelet
   DEPENDS system_lib OpenCV
 )
 
@@ -143,6 +144,7 @@ include_directories(
 # add_library(${PROJECT_NAME}
 #   src/${PROJECT_NAME}/pub_sub_demo.cpp
 # )
+add_library(nodelet_camera src/camera_nodelet.cpp)
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
@@ -157,6 +159,7 @@ add_executable(sub_test_node src/sub_node.cpp)
 add_executable(lumenera_camera src/lumenera_camera.cpp)
 add_executable(optical_flow src/optical_flow.cpp)
 add_executable(structure_from_motion src/structure_from_motion.cpp)
+add_executable(camera_node src/camera_node.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -188,6 +191,13 @@ target_link_libraries(structure_from_motion
    ${catkin_LIBRARIES}
    ${OpenCV_LIBRARIES}
 )
+target_link_libraries(nodelet_camera ${catkin_LIBRARIES})
+if(catkin_EXPORTED_LIBRARIES)
+  add_dependencies(nodelet_camera ${catkin_EXPORTED_LIBRARIES})
+endif()
+target_link_libraries(camera_node
+   ${catkin_LIBRARIES}
+)
 
 #############
 ## Install ##
@@ -209,6 +219,15 @@ target_link_libraries(structure_from_motion
 #   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
 #   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
+## Mark the nodelet library for installations
+install(TARGETS nodelet_camera
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+
+## Mark other files for installation (e.g. launch and bag files, etc.)
+install(FILES nodelet_camera.xml camera_nodelet.launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
 
 ## Mark cpp header files for installation
 # install(DIRECTORY include/${PROJECT_NAME}/
