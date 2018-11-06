@@ -4,8 +4,14 @@
 
 int main(int argc, char **argv)
 {
+    //
+    // standard node code...
+    //
     ros::init(argc, argv, "camera_node");
     ros::NodeHandle nh;
+    //
+    // code to alllow loading the nodelet plugin dynamically form a running node
+    //
     std::string nodelet_name = "camera_nodelet";
     std::string nodelet_topic = "/in";
     nodelet_topic = nodelet_name + nodelet_topic;
