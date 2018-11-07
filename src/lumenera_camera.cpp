@@ -1,4 +1,5 @@
 #include <ros/ros.h>
+#include <nodelet/loader.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
 #include <sensor_msgs/SetCameraInfo.h>
@@ -21,7 +22,6 @@
 #include <boost/filesystem.hpp>
 
 #define TARGET_BRIGHTNESS       60
-#define STABILIZATION_COUNT     10
 #define LOOP_AND_FRAME_RATE     30.0
 #define CHAR_BUFFER_SIZE        100
 
@@ -259,11 +259,6 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
     //
-    // instantiate a publisher for camera images
-    //
-    ros::Publisher image_pub =
-            nh.advertise<sensor_msgs::Image>("lumenera_camera/image_raw", 10);
-    //
     // instantiate a publisher for camera calibration info
     //
     ros::Publisher camera_info_pub =
@@ -323,6 +318,7 @@ int main(int argc, char **argv)
     //
     LucamGetFormat(hCamera, &frameFormat, &frameRate);
     ROS_INFO_STREAM("current frame rate: " << frameRate);
+    loop_rate = (ros::Rate)frameRate;
     //
     // initialize camera calibration data
     //
@@ -340,6 +336,22 @@ int main(int argc, char **argv)
     if (LucamStreamVideoControl(hCamera, START_STREAMING, NULL) == FALSE) {
        ROS_INFO_STREAM("Failed to start streaming");
     }
+    //
+    // code to allow loading the nodelet plugin dynamically form a running node
+    //
+    std::string nodelet_name = "lumenera_camera_nodelet";
+    std::string nodelet_topic = "/image_raw";
+    nodelet_topic = nodelet_name + nodelet_topic;
+    nodelet::Loader nodelet;
+    nodelet::M_string remap(ros::names::getRemappings());
+    nodelet::V_string nargv;
+    nodelet.load(nodelet_name, "ros_visnav_slam_camera/LumeneraCameraNodelet", remap, nargv);
+    //
+    // instantiate a publisher for camera images
+    //
+    ros::Publisher image_pub =
+            nh.advertise<sensor_msgs::Image>(nodelet_topic, 10);
+
     //
     // loop while acquiring image frames from the stream
     //
@@ -385,51 +397,41 @@ int main(int argc, char **argv)
             ROS_ERROR_STREAM("Failed to capture image");
         }
         //
-        // allow the auto settings to settle before transferring image data
+        // reset the counter
         //
-        if (count == STABILIZATION_COUNT) {
-            //
-            // reset the counter
-            //
-            count = 0;
-            //
-            // declare an image message object to hold the data
-            //
-            sensor_msgs::Image image;
-            //
-            // update camera info time stamp
-            //
-            cameraInfo.header.stamp = ros::Time::now();
-            //
-            // configure the image message
-            //
-            image.header.stamp = cameraInfo.header.stamp;
-            image.data = rawImageData;
-            image.height = imageHeight;
-            image.width = imageWidth;
-            image.step = imageWidth;
-            image.encoding = sensor_msgs::image_encodings::BAYER_BGGR8;
-            //
-            // publish the image to an image_view data type
-            //
-            image_pub.publish(image);
-            //
-            // save the snap shot to OpenCV Mat
-            //
-            frame = cv::Mat(cv::Size(imageWidth, imageHeight),
-                          CV_8UC1,
-                          rawImageData.data(),
-                          cv::Mat::AUTO_STEP);
-            //
-            // publish the image to an image_view data type
-            //
-            image_pub.publish(image);
-            //
-            // publish the camera info
-            //
-            camera_info_pub.publish(cameraInfo);
-        }
-        ++count;
+        count = 0;
+        //
+        // declare an image message object to hold the data
+        //
+        sensor_msgs::Image image;
+        //
+        // update camera info time stamp
+        //
+        cameraInfo.header.stamp = ros::Time::now();
+        //
+        // configure the image message
+        //
+        image.header.stamp = cameraInfo.header.stamp;
+        image.data = rawImageData;
+        image.height = imageHeight;
+        image.width = imageWidth;
+        image.step = imageWidth;
+        image.encoding = sensor_msgs::image_encodings::BAYER_BGGR8;
+        //
+        // save the snap shot to OpenCV Mat
+        //
+        frame = cv::Mat(cv::Size(imageWidth, imageHeight),
+                        CV_8UC1,
+                        rawImageData.data(),
+                        cv::Mat::AUTO_STEP);
+        //
+        // publish the image to an image_view data type
+        //
+        image_pub.publish(image);
+        //
+        // publish the camera info
+        //
+        camera_info_pub.publish(cameraInfo);
         //
         // process callbacks and check for messages
         //

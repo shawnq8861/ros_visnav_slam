@@ -1,0 +1,9 @@
+<library path="lib/libnodelet_lumenera_camera">
+  <class name="ros_visnav_slam_camera/LumeneraCameraNodelet"
+         type="ros_visnav_slam_camera::LumeneraCameraNodelet"
+         base_class_type="nodelet::Nodelet">
+    <description>
+      A nodelet to test getting nodelets working.
+    </description>
+  </class>
+</library>
