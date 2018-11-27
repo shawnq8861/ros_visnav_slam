@@ -23,7 +23,13 @@ int main(int argc, char **argv)
     //
     // instantiate a service to be called to save an image to file
     //
-    ros::ServiceServer save_image_service = nh.advertiseService(
+    ros::ServiceServer save_image_service = private_nh.advertiseService<ros_visnav_slam::SaveImageRequest,
+            ros_visnav_slam::SaveImageResponse>(
+                "save_image",
+                boost::bind(saveImageCB, _1, _2, &imageHeight, &imageWidth, &frame));
+
+
+            save_image_service = nh.advertiseService(
                 "lumenera_camera/save_image",
                 &saveImageCB);
     //

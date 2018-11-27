@@ -37,15 +37,18 @@ private:
         // create the timer callback in which the images will be published
         //
         timer = private_nh.createTimer(ros::Duration(1.0/frameRate),
-                                       boost::bind(&CameraAcquireNodelet::timerCB, this, _1) );
+                               boost::bind(&CameraAcquireNodelet::timerCB,
+                               this, _1) );
         //
         // instantiate a service to be called to save an image to file
         //
-        save_image_service = private_nh.advertiseService<ros_visnav_slam::SaveImageRequest,
+        save_image_service = private_nh.advertiseService
+                <ros_visnav_slam::SaveImageRequest,
                 ros_visnav_slam::SaveImageResponse>(
                     "save_image",
-                    //&saveImageCB);
-                    boost::bind(saveImageCB, _1, _2, &imageHeight, &imageWidth, &frame));
+                    boost::bind(saveImageCB,
+                                _1, _2,
+                                &imageHeight, &imageWidth, &frame));
         //
         // initialize camera calibration data
         //
