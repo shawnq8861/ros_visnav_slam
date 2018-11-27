@@ -27,11 +27,22 @@ int main(int argc, char **argv)
                 "lumenera_camera/save_image",
                 &saveImageCB);
     //
+    // initialize camera calibration data
+    //
+    sensor_msgs::CameraInfo cameraInfo;
+    if(EXIT_FAILURE == initializeCameraCalibrationData(cameraInfo)) {
+        ROS_ERROR_STREAM("calibration data initialization failed...");
+        return EXIT_FAILURE;
+    }
+    //
     // instantiate a service to be called after the camera calibrated
     //
-    ros::ServiceServer calibration_service = nh.advertiseService(
-                "lumenera_camera/set_camera_info",
-                &setAndSaveCameraCalibrationData);
+    ros::ServiceServer calibration_service = nh.advertiseService<sensor_msgs::SetCameraInfoRequest,
+            sensor_msgs::SetCameraInfoResponse>(
+                "set_camera_info",
+                boost::bind(setAndSaveCameraCalibrationData,
+                            _1, _2, &cameraInfo, &imageHeight, &imageWidth) );
+
     //
     // get the number of cameras
     //
@@ -71,13 +82,6 @@ int main(int argc, char **argv)
     LucamGetFormat(hCamera, &frameFormat, &frameRate);
     ROS_INFO_STREAM("current frame rate: " << frameRate);
     loop_rate = (ros::Rate)frameRate;
-    //
-    // initialize camera calibration data
-    //
-    if(EXIT_FAILURE == initializeCameraCalibrationData()) {
-        ROS_ERROR_STREAM("calibration data initialization failed...");
-        return EXIT_FAILURE;
-    }
     //
     // create vectors to hold image data
     //

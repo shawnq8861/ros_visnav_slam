@@ -28,10 +28,6 @@
 #define LOOP_AND_FRAME_RATE     30.0
 #define CHAR_BUFFER_SIZE        100
 
-static ULONG imageWidth;
-static ULONG imageHeight;
-static cv::Mat frame;
-static sensor_msgs::CameraInfo cameraInfo;
 static const std::string cameraName = "lumenera_camera";
 static const char *calibrationFolderName =
         "/catkin_ws/src/ros_visnav_slam/data/";
@@ -91,28 +87,31 @@ bool checkCalibrationFilePath(void)
 // the values to a file
 //
 bool setAndSaveCameraCalibrationData(sensor_msgs::SetCameraInfo::Request &req,
-         sensor_msgs::SetCameraInfo::Response &resp)
+                                     sensor_msgs::SetCameraInfo::Response &resp,
+                                     sensor_msgs::CameraInfo *cameraInfo,
+                                     ULONG *imageHeight,
+                                     ULONG *imageWidth)
 {
     //
     // set the camera info
     //
-    cameraInfo.header.stamp = ros::Time::now();
-    cameraInfo.height = imageHeight;
-    cameraInfo.width = imageWidth;
-    cameraInfo.distortion_model = req.camera_info.distortion_model;
-    cameraInfo.D = req.camera_info.D;
-    cameraInfo.K = req.camera_info.K;
-    cameraInfo.R = req.camera_info.R;
-    cameraInfo.P = req.camera_info.P;
-    cameraInfo.binning_x = req.camera_info.binning_x;
-    cameraInfo.binning_y = req.camera_info.binning_y;
-    cameraInfo.roi = req.camera_info.roi;
+    cameraInfo->header.stamp = ros::Time::now();
+    cameraInfo->height = *imageHeight;
+    cameraInfo->width = *imageWidth;
+    cameraInfo->distortion_model = req.camera_info.distortion_model;
+    cameraInfo->D = req.camera_info.D;
+    cameraInfo->K = req.camera_info.K;
+    cameraInfo->R = req.camera_info.R;
+    cameraInfo->P = req.camera_info.P;
+    cameraInfo->binning_x = req.camera_info.binning_x;
+    cameraInfo->binning_y = req.camera_info.binning_y;
+    cameraInfo->roi = req.camera_info.roi;
     //
     // write data to yaml file
     //
     camera_calibration_parsers::writeCalibration(calibrationFilePath,
                                                  cameraName,
-                                                 cameraInfo);
+                                                 *cameraInfo);
     //
     // fill in the response object
     //
@@ -123,11 +122,13 @@ bool setAndSaveCameraCalibrationData(sensor_msgs::SetCameraInfo::Request &req,
 
 //
 // initialize the camera calibration parameters if the parameter file is
-// no found
+// not found
 //
 // default values are all set to zero
 //
-bool initializeCameraCalibrationData(void)
+bool initializeCameraCalibrationData(sensor_msgs::CameraInfo cameraInfo,
+                                     const ULONG imageHeight,
+                                     const ULONG imageWidth)
 {
     //
     // read the data
@@ -175,7 +176,10 @@ bool initializeCameraCalibrationData(void)
 // service to the save an image to a file
 //
 bool saveImageCB(ros_visnav_slam::SaveImageRequest& request,
-                 ros_visnav_slam::SaveImageResponse& response)
+                 ros_visnav_slam::SaveImageResponse& response,
+                 ULONG *imageHeight,
+                 ULONG *imageWidth,
+                 cv::Mat *frame)
 {
     //
     // extract the directory and base name from the path
@@ -237,8 +241,8 @@ bool saveImageCB(ros_visnav_slam::SaveImageRequest& request,
     else {
         ROS_INFO_STREAM("folder found...");
     }
-    cv::Mat saveFrame(cv::Size(imageWidth, imageHeight),CV_8UC3);
-    cv::cvtColor(frame, saveFrame, cv::COLOR_BayerBG2RGB);
+    cv::Mat saveFrame(cv::Size(*imageWidth, *imageHeight), CV_8UC3);
+    cv::cvtColor(*frame, saveFrame, cv::COLOR_BayerBG2RGB);
     std::vector<int> compression_params;
     compression_params.push_back(cv::IMWRITE_JPEG_QUALITY);
     compression_params.push_back(95);
@@ -251,4 +255,75 @@ bool saveImageCB(ros_visnav_slam::SaveImageRequest& request,
     return true;
 }
 
+int configureCamera(HANDLE& hCamera,
+                     ULONG& imageWidth,
+                     ULONG& imageHeight,
+                     float& frameRate)
+{
+    //
+    // check the calibration file path, return if not valid
+    //
+    if (!checkCalibrationFilePath()) {
+        return EXIT_FAILURE;
+    }
+    //
+    // set the loop rate used by spin to control while loop execution
+    // this is an integer that equates to loops/second
+    //
+    //ros::Rate loop_rate = LOOP_AND_FRAME_RATE;
+    //
+    // get the number of cameras
+    //
+    LONG numCameras = LucamNumCameras();
+    ROS_INFO_STREAM("number of cameras: " << numCameras);
+    //
+    // attempt to get a camera handle
+    //
+    hCamera = LucamCameraOpen(1);
+    if (NULL == hCamera) {
+        ROS_ERROR_STREAM("ERROR %u: Unable to open camera.\n"
+                         << (unsigned int)LucamGetLastError());
+        return EXIT_FAILURE;
+    }
+    //
+    // get the frame format
+    //
+    LUCAM_FRAME_FORMAT frameFormat;
+    LucamGetFormat(hCamera, &frameFormat, &frameRate);
+    imageWidth = (frameFormat.width / frameFormat.subSampleX);
+    imageHeight = (frameFormat.height / frameFormat.subSampleY);
+    LUCAM_CONVERSION conversionParams;
+    conversionParams.CorrectionMatrix = LUCAM_CM_FLUORESCENT;
+    conversionParams.DemosaicMethod = LUCAM_DM_HIGHER_QUALITY;
+    //
+    // display current frame rate
+    //
+    ROS_INFO_STREAM("current frame rate: " << frameRate);
+    //
+    // set new frame rate
+    //
+    LucamSetFormat(hCamera, &frameFormat, LOOP_AND_FRAME_RATE);
+    //
+    // display current frame rate
+    //
+    LucamGetFormat(hCamera, &frameFormat, &frameRate);
+    ROS_INFO_STREAM("current frame rate: " << frameRate);
+    //
+    // initialize camera calibration data
+    //
+    sensor_msgs::CameraInfo cameraInfo;
+    if(EXIT_FAILURE == initializeCameraCalibrationData(cameraInfo,
+                                                       imageHeight,
+                                                       imageWidth)) {
+        ROS_ERROR_STREAM("calibration data initialization failed...");
+        return EXIT_FAILURE;
+    }
+    //
+    // start the video stream, NULL window handle
+    //
+    if (LucamStreamVideoControl(hCamera, START_STREAMING, NULL) == FALSE) {
+       ROS_INFO_STREAM("Failed to start streaming");
+    }
+    return EXIT_SUCCESS;
+}
 #endif // CAMERA_HEADER_HPP

@@ -1,0 +1,9 @@
+<library path="lib/libnodelet_camera_acquire">
+  <class name="ros_visnav_slam_camera/CameraAcquireNodelet"
+         type="ros_visnav_slam_camera::CameraAcquireNodelet"
+         base_class_type="nodelet::Nodelet">
+    <description>
+      A nodelet that configures the camera and acquires images.
+    </description>
+  </class>
+</library>
